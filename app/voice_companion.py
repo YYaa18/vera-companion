@@ -345,6 +345,29 @@ class App(QObject):
         self.peer.on_message = self._on_peer_message
         self.peer.start()
 
+        # 房主：应答局域网内的自动发现，让加入方能「一键找到我」
+        self._discovery_sock = None
+        self._discovery_stop = [False]
+        if cfg.get("peer_is_host", True):
+            try:
+                local_ip = cfg.get("peer_local_ip") or ""
+                if not local_ip:
+                    try:
+                        import net_adapters
+                        local_ip, _label = net_adapters.best_guess()
+                    except Exception:
+                        local_ip = ""
+                room = (cfg.get("game_room_code") or "").strip().upper()
+                self._discovery_sock = ai_peer.answer_discovery(
+                    port=int(cfg.get("peer_port") or ai_peer.DEFAULT_PORT),
+                    local_ip=local_ip, room=room,
+                    stop_flag=lambda: self._discovery_stop[0],
+                )
+                if self._discovery_sock:
+                    print(f"[peer] 自动发现已开启 ({local_ip})", flush=True)
+            except Exception as e:
+                print(f"[peer] 自动发现启动失败: {e}", flush=True)
+
         # 定时巡查本地状态，触发事件消息
         self.peer_timer = QTimer()
         self.peer_timer.timeout.connect(self._peer_tick)
@@ -517,6 +540,10 @@ class App(QObject):
             pass
         try:
             self.tray.hide()
+        except Exception:
+            pass
+        try:
+            self._discovery_stop[0] = True
         except Exception:
             pass
         try:
