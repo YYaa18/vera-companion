@@ -12,9 +12,10 @@ import os
 block_cipher = None
 
 # 人设文件随 exe 一起打包，运行时从 _MEIPASS/personas 读。
-# PyInstaller 以 spec 所在目录为工作目录，所以相对路径即可。
+# 用 spec 自身的位置定位 —— PyInstaller 的工作目录是调用它的地方，不一定是 app/。
+_here = os.path.dirname(os.path.abspath(SPEC))
 persona_files = []
-_pdir = "personas"
+_pdir = os.path.join(_here, "personas")
 if os.path.isdir(_pdir):
     for _fn in sorted(os.listdir(_pdir)):
         if _fn.endswith(".txt"):
@@ -34,6 +35,7 @@ a = Analysis(
         "speech_bubble",
         "pet_window",
         "pet_widget",
+        "pet_personas",
         "game_state",
         "cheat_actions",
         "ai_peer",
