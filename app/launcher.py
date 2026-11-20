@@ -95,6 +95,30 @@ def check_icon(size=16):
     return pm
 
 
+class NoWheelCombo(QComboBox):
+    """A combo box that ignores the wheel unless its popup is open.
+
+    Qt's default changes the selection on hover-scroll, which makes it far too
+    easy to nudge a setting while just scrolling the page.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFocusPolicy(Qt.StrongFocus)
+
+    def wheelEvent(self, event):
+        # 弹窗开着时交给默认处理（真正的列表滚动），否则吞掉
+        view = self.view()
+        if view is not None and view.isVisible():
+            super().wheelEvent(event)
+            return
+        event.ignore()
+
+    def focusOutEvent(self, event):
+        # 失去焦点时把滚轮事件交还给父窗口，页面能正常滚动
+        super().focusOutEvent(event)
+
+
 class Card(QFrame):
     def __init__(self, title=""):
         super().__init__()
@@ -210,18 +234,18 @@ class Launcher(QMainWindow):
         self.url_edit = QLineEdit(self.cfg.get("base_url", "https://api.deepseek.com"))
         self.url_edit.setMinimumHeight(32)
 
-        self.model_box = QComboBox()
+        self.model_box = NoWheelCombo()
         self.model_box.setEditable(True)
         self.model_box.addItems(["deepseek-flash", "deepseek-v4-pro"])
         self.model_box.setCurrentText(self.cfg.get("model", "deepseek-flash"))
         self.model_box.setMinimumHeight(32)
 
-        self.voice_box = QComboBox()
+        self.voice_box = NoWheelCombo()
         self.voice_box.addItems(["stella（女声）", "tide（男声）"])
         self.voice_box.setCurrentIndex(0 if self.cfg.get("voice", "stella") == "stella" else 1)
         self.voice_box.setMinimumHeight(32)
 
-        self.persona_box = QComboBox()
+        self.persona_box = NoWheelCombo()
         self.persona_items = []
         try:
             import personas
@@ -295,7 +319,7 @@ class Launcher(QMainWindow):
         grid.addWidget(self.voice_box, 4, 1, 1, 3)
 
         grid.addWidget(lab("气泡字号"), 5, 0)
-        self.bubble_size_box = QComboBox()
+        self.bubble_size_box = NoWheelCombo()
         for label, key in (("标准", "small"), ("大（推荐）", "normal"),
                            ("特大", "large"), ("超大", "huge")):
             self.bubble_size_box.addItem(label, key)
@@ -313,7 +337,7 @@ class Launcher(QMainWindow):
 
         # 辅助程度
         grid.addWidget(lab("辅助"), 6, 0)
-        self.help_box = QComboBox()
+        self.help_box = NoWheelCombo()
         try:
             import help_level
             for key, label, desc in help_level.choices():
@@ -434,7 +458,7 @@ class Launcher(QMainWindow):
         edit_style = (f"background:{CARD2};color:{FG};border:1px solid #2f3441;"
                       "border-radius:7px;padding:4px 8px;")
 
-        self.game_net_adapter = QComboBox()
+        self.game_net_adapter = NoWheelCombo()
         try:
             import net_adapters
             rows = net_adapters.friendly_rows()
@@ -568,14 +592,14 @@ UU 同一个房间里直接就能连，不用动路由器。""")
         edit_style = (f"background:{CARD2};color:{FG};border:1px solid #2f3441;"
                       "border-radius:7px;padding:4px 8px;")
 
-        self.peer_mode = QComboBox()
+        self.peer_mode = NoWheelCombo()
         self.peer_mode.addItems(["我是房主（等对方来连）", "我是加入方（连对方）"])
         self.peer_mode.setCurrentIndex(0 if self.cfg.get("peer_is_host", True) else 1)
         self.peer_mode.setMinimumHeight(30)
         self.peer_mode.setStyleSheet(edit_style)
 
         # 线路选择：默认自动，认出 UU 就用 UU
-        self.peer_adapter = QComboBox()
+        self.peer_adapter = NoWheelCombo()
         self.peer_adapters = []
         self._finding = False
         try:
