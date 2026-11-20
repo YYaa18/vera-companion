@@ -48,6 +48,9 @@ Name: "launchafter"; Description: "安装完成后启动"; GroupDescription: "�
 [Files]
 ; 主程序（单文件 exe，含启动器与助手）
 Source: "..\dist\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
+; 游戏程序本体（MIT 开源的 recvx-enhanced-port，不含任何游戏数据）
+Source: "..\vendor\recvx.exe"; DestDir: "{app}\game"; Flags: ignoreversion
+Source: "..\vendor\LICENSE-recvx-enhanced-port.txt"; DestDir: "{app}\game"; Flags: ignoreversion
 ; 人设文本，用户可以自己改
 Source: "..\app\personas\*.txt"; DestDir: "{app}\personas"; Flags: ignoreversion
 ; 同步上游的工具
