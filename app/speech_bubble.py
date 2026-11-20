@@ -40,12 +40,15 @@ class SpeechBubble(QWidget):
 
     def __init__(self):
         super().__init__()
+        # 不用 Qt.WindowTransparentForInput：那个标志会让窗口完全不进入
+        # 事件循环，叠在角色上时会把角色的点击一起吃掉，
+        # 表现就是"点一下之后就没反应了"。用属性做穿透即可。
         self.setWindowFlags(
-            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
-            Qt.Tool | Qt.WindowTransparentForInput
+            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
         self.text = ""
         self.label = ""
