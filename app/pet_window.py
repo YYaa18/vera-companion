@@ -523,19 +523,19 @@ class PetWindow(QWidget):
                 p.drawPath(path)
 
         elif acc == "tuft":
-            # 一根呆毛，会随风摆
-            sway = math.sin(self.t * 2.6) * 0.10
+            # 一根呆毛：根部粗、末端翘，会随风摆
+            sway = math.sin(self.t * 2.6) * 0.09
             path = QPainterPath()
-            base_x, base_y = bw * 0.02, -bh * 0.46
-            path.moveTo(base_x - bw * 0.030, base_y)
-            path.cubicTo(base_x + bw * (0.01 + sway), base_y - bh * 0.26,
-                         base_x + bw * (0.17 + sway), base_y - bh * 0.30,
-                         base_x + bw * (0.13 + sway * 1.5), base_y - bh * 0.44)
-            path.cubicTo(base_x + bw * 0.10, base_y - bh * 0.22,
-                         base_x + bw * 0.04, base_y - bh * 0.14,
-                         base_x + bw * 0.030, base_y)
+            base_x, base_y = bw * 0.03, -bh * 0.455
+            path.moveTo(base_x - bw * 0.065, base_y)
+            path.cubicTo(base_x - bw * (0.03 - sway), base_y - bh * 0.20,
+                         base_x + bw * (0.08 + sway), base_y - bh * 0.30,
+                         base_x + bw * (0.175 + sway * 1.6), base_y - bh * 0.43)
+            path.cubicTo(base_x + bw * (0.085 + sway * 0.6), base_y - bh * 0.20,
+                         base_x + bw * 0.075, base_y - bh * 0.12,
+                         base_x + bw * 0.065, base_y)
             path.closeSubpath()
-            p.setPen(Qt.NoPen)
+            p.setPen(QPen(QColor(20, 60, 80, 90), max(0.9, bw * 0.007)))
             p.setBrush(t["fin_dark"])
             p.drawPath(path)
 
@@ -584,14 +584,21 @@ class PetWindow(QWidget):
 
         elif acc == "horns":
             # 项圈：细一些，压在身体下沿，露出嘴
-            y = bh * 0.335
-            p.setPen(QPen(QColor(18, 22, 36), max(1.1, bw * 0.009)))
+            # 项圈：贴着身体下缘的一道弧，两端收窄，不会戳出轮廓
+            y = bh * 0.245
+            band = QPainterPath()
+            band.moveTo(-bw * 0.285, y)
+            band.quadTo(0, y + bh * 0.150, bw * 0.285, y)
+            band.lineTo(bw * 0.265, y + bh * 0.048)
+            band.quadTo(0, y + bh * 0.196, -bw * 0.265, y + bh * 0.048)
+            band.closeSubpath()
+            p.setPen(QPen(QColor(18, 22, 36), max(1.0, bw * 0.008)))
             p.setBrush(QColor(44, 32, 52, 235))
-            p.drawRoundedRect(QRectF(-bw * 0.26, y, bw * 0.52, bh * 0.052),
-                              bh * 0.026, bh * 0.026)
+            p.drawPath(band)
+            # 宝石挂在弧的最低点
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(200, 76, 118, 240))
-            p.drawEllipse(QRectF(-bw * 0.030, y + bh * 0.004, bw * 0.060, bh * 0.046))
+            p.drawEllipse(QRectF(-bw * 0.028, y + bh * 0.108, bw * 0.056, bh * 0.044))
 
     # ---- 状态图标 -----------------------------------------------------
     def _draw_extras(self, p, bw, bh):
