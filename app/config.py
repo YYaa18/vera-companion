@@ -72,6 +72,8 @@ DEFAULTS = {
     "model": "deepseek-flash",
     "voice": "stella",
     "persona": "gentle",
+    # AI 辅助程度：full / guide / none
+    "help_level": "guide",
     "input_device": None,
     "output_device": None,
     "iso_path": "",
