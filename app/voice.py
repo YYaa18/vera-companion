@@ -21,56 +21,90 @@ ASR_URL = "/v1/tools/asr"
 # ------------------------------------------------------------------ recording
 
 class Recorder:
-    """Records mic audio into a list of numpy chunks at 16 kHz mono."""
+    """Records mic audio into a thread-safe queue at 16 kHz mono.
+
+    音频回调跑在 PortAudio 自己的线程里，不能在回调里拿锁、也不能让回调
+    里抛异常——那会把 PortAudio 的线程卡死（表现为整个程序失去响应）。
+    这里用 queue.Queue（内部自带锁且无阻塞写）收集数据，
+    停止时先让回调自己看到 _want=False 退出，再关流。
+    """
 
     RATE = 16000
 
     def __init__(self, device=None):
         self.device = device
         self.stream = None
-        self.frames = []
-        self.recording = False
-        self._lock = threading.Lock()
+        self._q = queue.Queue()
+        self._want = False        # 回调看到 False 就丢弃数据
+        self._stopping = False
 
     def start(self):
         import sounddevice as sd
 
-        with self._lock:
-            if self.recording:
-                return
-            self.frames = []
-            self.recording = True
-            self.stream = sd.InputStream(
-                samplerate=self.RATE, channels=1, dtype="int16",
-                device=self.device, blocksize=1024,
-                callback=self._cb,
-            )
-            self.stream.start()
+        if self.stream is not None:
+            return
+        # 丢掉上一轮残留
+        while not self._q.empty():
+            try:
+                self._q.get_nowait()
+            except queue.Empty:
+                break
+        self._want = True
+        self._stopping = False
+        stream = sd.InputStream(
+            samplerate=self.RATE, channels=1, dtype="int16",
+            device=self.device, blocksize=1024,
+            callback=self._cb,
+        )
+        stream.start()
+        self.stream = stream
 
-    def _cb(self, indata, _frames, _time, _status):
-        if self.recording:
-            with self._lock:
-                self.frames.append(indata.copy())
+    def _cb(self, indata, _frames, _time, status):
+        # 绝不能在回调里抛异常：PortAudio 会让整条音频线程失效。
+        # Queue.put_nowait 不加外部锁，安全。
+        try:
+            if self._want and not self._stopping:
+                self._q.put_nowait(indata.copy())
+        except Exception:
+            pass
 
     def stop(self):
         """Stop and return WAV bytes, or None if nothing was captured."""
-        import sounddevice as sd
+        stream, self.stream = self.stream, None
+        if stream is None:
+            return None
 
-        with self._lock:
-            if not self.recording:
-                return None
-            self.recording = False
-            frames, self.frames = self.frames, []
-            stream, self.stream = self.stream, None
-        if stream is not None:
+        self._want = False          # 先让回调放弃新数据
+        self._stopping = True
+
+        frames = []
+        while True:
+            try:
+                frames.append(self._q.get_nowait())
+            except queue.Empty:
+                break
+
+        # 关流放到后台，最多等 1.5 秒；卡住也不拖住界面
+        def _shutdown():
             try:
                 stream.stop()
+            except Exception:
+                pass
+            try:
                 stream.close()
             except Exception:
                 pass
+
+        t = threading.Thread(target=_shutdown, daemon=True)
+        t.start()
+        t.join(timeout=1.5)
+
         if not frames:
             return None
-        audio = np.concatenate(frames, axis=0)
+        try:
+            audio = np.concatenate(frames, axis=0)
+        except Exception:
+            return None
         if len(audio) < self.RATE * 0.25:
             return None
         buf = io.BytesIO()
@@ -82,11 +116,17 @@ class Recorder:
         return buf.getvalue()
 
     def level(self):
-        """Rough current input level 0..1, for the listening animation."""
-        with self._lock:
-            if not self.frames:
+        """Rough current input level 0..1, for the listening animation.
+
+        Peeks at the newest chunk without consuming it, so stop() still gets it.
+        """
+        try:
+            q = self._q.queue
+            if not q:
                 return 0.0
-            last = self.frames[-1]
+            last = q[-1]
+        except Exception:
+            return 0.0
         a = np.abs(last.astype(np.int32))
         return float(min(1.0, a.mean() / 6000.0))
 
