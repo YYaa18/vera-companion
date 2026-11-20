@@ -229,15 +229,24 @@ class Launcher(QMainWindow):
         except Exception:
             self.persona_items = []
         for name, key, desc in self.persona_items:
-            self.persona_box.addItem(name)
+            self.persona_box.addItem(self._persona_thumb(key), name)
+            idx = self.persona_box.count() - 1
             if desc:
-                self.persona_box.setItemData(self.persona_box.count() - 1, desc, Qt.ToolTipRole)
+                self.persona_box.setItemData(idx, desc, Qt.ToolTipRole)
+            self.persona_box.setItemData(idx, key, Qt.UserRole)
         cur = self.cfg.get("persona", "gentle")
         for i, (name, key, desc) in enumerate(self.persona_items):
             if key == cur:
                 self.persona_box.setCurrentIndex(i)
                 break
         self.persona_box.setMinimumHeight(32)
+        self.persona_box.setIconSize(QSize(44, 44))
+        self.persona_box.setStyleSheet(
+            f"QComboBox{{background:{CARD2};color:{FG};border:1px solid #2f3441;"
+            "border-radius:7px;padding:3px 8px;}"
+            "QComboBox QAbstractItemView{background:#1d2029;color:#e6edf3;"
+            "selection-background-color:#2f6f99;padding:4px;}"
+        )
         if self.persona_items:
             first = self.persona_items[0]
             for name, key, desc in self.persona_items:
@@ -660,10 +669,47 @@ class Launcher(QMainWindow):
             self.persona_hint.setText("")
 
     def _current_persona_key(self):
+        key = self.persona_box.currentData()
+        if key:
+            return key
         idx = self.persona_box.currentIndex()
         if 0 <= idx < len(self.persona_items):
             return self.persona_items[idx][1]
         return "gentle"
+
+    def _persona_thumb(self, key):
+        """Render a small preview of the character so the user can see it."""
+        try:
+            from pet_window import PetWindow
+            from PySide6.QtGui import QPixmap, QPainter
+            from PySide6.QtCore import Qt as _Qt
+            w = PetWindow()
+            w.size_px = 96
+            w.resize(96, 96)
+            w.set_persona(key)
+            w.t = 1.2
+            pm = w.grab()
+            # 圆角裁切，看起来像头像
+            S = 64
+            out = QPixmap(S, S)
+            out.fill(_Qt.transparent)
+            p = QPainter(out)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setClipPath(self._round_path(S, S, 12))
+            p.drawPixmap(0, 0, pm.scaled(S, S, _Qt.KeepAspectRatioByExpanding,
+                                         _Qt.SmoothTransformation))
+            p.end()
+            return QIcon(out)
+        except Exception:
+            return QIcon()
+
+    @staticmethod
+    def _round_path(w, h, r):
+        from PySide6.QtGui import QPainterPath
+        from PySide6.QtCore import QRectF
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(0, 0, w, h), r, r)
+        return path
 
     def _style_check(self, box):
         """Fusion draws an invisible indicator on dark backgrounds; draw our own.
