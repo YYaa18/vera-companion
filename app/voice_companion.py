@@ -244,6 +244,11 @@ class App(QObject):
             self.power_prompt = ""
 
         self.pet = PetWindow()
+        # 角色外观跟着人设变：配色、眼睛、嘴、配饰、动作节奏都不同
+        try:
+            self.pet.set_persona(self.persona_key)
+        except Exception:
+            pass
         self.pet.clicked.connect(self.toggle_listen)
         self.pet.right_clicked.connect(self._show_pet_menu)
         self.pet.show()
