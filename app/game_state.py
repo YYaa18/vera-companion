@@ -8,6 +8,8 @@
 """
 import ctypes
 import ctypes.wintypes as wt
+import json
+import os
 import struct
 import subprocess
 
@@ -32,6 +34,47 @@ NAMES_COUNT = 156
 NAMES_STRIDE = 32
 ROOMS_COUNT = 19
 ROOMS_STRIDE = 24
+
+# 从游戏内存读到的物品名/房间名，缓存到磁盘。
+# 这些字符串是运行时从玩家自己的游戏里读的，不随仓库分发。
+CACHE_PATH = None
+
+
+def _cache_path():
+    """Where the item/room name cache lives (next to settings.json)."""
+    global CACHE_PATH
+    if CACHE_PATH:
+        return CACHE_PATH
+    try:
+        import config
+        CACHE_PATH = os.path.join(config.DATA, "game_text_cache.json")
+    except Exception:
+        CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "game_text_cache.json")
+    return CACHE_PATH
+
+
+def load_cache():
+    """Return (names, rooms) from a previous session, or ({}, {})."""
+    try:
+        with open(_cache_path(), encoding="utf-8") as f:
+            d = json.load(f)
+        names = {int(k): v for k, v in (d.get("names") or {}).items()}
+        rooms = {int(k): v for k, v in (d.get("rooms") or {}).items()}
+        return names, rooms
+    except Exception:
+        return {}, {}
+
+
+def save_cache(names, rooms):
+    if not names and not rooms:
+        return
+    try:
+        with open(_cache_path(), "w", encoding="utf-8") as f:
+            json.dump({"names": names, "rooms": rooms}, f, ensure_ascii=False)
+    except Exception:
+        pass
+
 
 # 房间名表（来自 pc/src/host/teleport.c 的 labels[]），g_cheat.rooms 只覆盖前 18 个
 STAGE_NAMES = {
@@ -109,8 +152,8 @@ class GameState:
         self.exe = exe_name
         self.pid = None
         self.handle = None
-        self._names = {}
-        self._rooms = {}
+        self._names, self._rooms = load_cache()
+        self._cache_dirty = bool(self._names or self._rooms) is False
 
     # ---------------------------------------------------------------- handle
     def connect(self):
@@ -136,8 +179,7 @@ class GameState:
                 pass
         self.handle = None
         self.pid = None
-        self._names.clear()
-        self._rooms.clear()
+        # 不清缓存：名字表是稳定的，跨进程复用
 
     @property
     def connected(self):
@@ -175,19 +217,25 @@ class GameState:
         knife = inv[1]
         items = [(r >> 16, r & 0xFFFF) for r in inv[2:] if r]
 
-        # cache the name tables; they load once the game's messages are up
+        # Name tables load once the game's messages are up. Cache them to disk
+        # so a later session (or the title screen) still has the vocabulary.
+        got_new = False
         if not self._names:
             for i in range(NAMES_COUNT):
-                s = _cstr(blob[OFF_NAMES + i * NAMES_STRIDE:
-                               OFF_NAMES + (i + 1) * NAMES_STRIDE])
-                if s:
-                    self._names[i] = s
+                name = _cstr(blob[OFF_NAMES + i * NAMES_STRIDE:
+                                  OFF_NAMES + (i + 1) * NAMES_STRIDE])
+                if name:
+                    self._names[i] = name
+                    got_new = True
         if not self._rooms:
             for i in range(ROOMS_COUNT):
-                s = _cstr(blob[OFF_ROOMS + i * ROOMS_STRIDE:
-                               OFF_ROOMS + (i + 1) * ROOMS_STRIDE])
-                if s:
-                    self._rooms[i] = s
+                name = _cstr(blob[OFF_ROOMS + i * ROOMS_STRIDE:
+                                  OFF_ROOMS + (i + 1) * ROOMS_STRIDE])
+                if name:
+                    self._rooms[i] = name
+                    got_new = True
+        if got_new:
+            save_cache(self._names, self._rooms)
 
         item_list = []
         for iid, cnt in items:
