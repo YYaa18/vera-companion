@@ -33,8 +33,8 @@ def _is_link_local(ip):
     return ip.startswith("169.254.")
 
 
-def _adapter_names():
-    """Map ip -> adapter alias via PowerShell (no extra deps). Windows only."""
+def _adapter_names_powershell():
+    """Map ip -> adapter alias via PowerShell (the fast path)."""
     out = {}
     try:
         import subprocess
@@ -43,9 +43,11 @@ def _adapter_names():
              "Get-NetIPAddress -AddressFamily IPv4 | "
              "Select-Object IPAddress,InterfaceAlias | "
              "ForEach-Object { $_.IPAddress + '|' + $_.InterfaceAlias }"],
-            capture_output=True, timeout=15,
+            capture_output=True, timeout=12,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
+        if r.returncode != 0:
+            return {}
         text = r.stdout.decode("mbcs", "replace")
         for line in text.splitlines():
             if "|" in line:
@@ -54,6 +56,111 @@ def _adapter_names():
     except Exception:
         pass
     return out
+
+
+def _adapter_names_ctypes():
+    """Fallback: enumerate adapters through the Windows IP Helper API.
+
+    Works inside a frozen exe where spawning PowerShell may be blocked or too
+    slow. Returns the same shape as the PowerShell path.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    out = {}
+    iphlp = ctypes.WinDLL("iphlpapi", use_last_error=True)
+
+    class SOCKADDR(ctypes.Structure):
+        _fields_ = [("sa_family", wintypes.USHORT), ("sa_data", ctypes.c_ubyte * 14)]
+
+    class SOCKET_ADDRESS(ctypes.Structure):
+        _fields_ = [("lpSockaddr", ctypes.POINTER(SOCKADDR)),
+                    ("iSockaddrLength", ctypes.c_int)]
+
+    class IP_ADAPTER_UNICAST_ADDRESS(ctypes.Structure):
+        pass
+
+    IP_ADAPTER_UNICAST_ADDRESS._fields_ = [
+        ("Length", wintypes.ULONG),
+        ("Flags", wintypes.DWORD),
+        ("Next", ctypes.POINTER(IP_ADAPTER_UNICAST_ADDRESS)),
+        ("Address", SOCKET_ADDRESS),
+        ("PrefixOrigin", ctypes.c_int),
+        ("SuffixOrigin", ctypes.c_int),
+        ("DadState", ctypes.c_int),
+        ("ValidLifetime", wintypes.ULONG),
+        ("PreferredLifetime", wintypes.ULONG),
+        ("LeaseLifetime", wintypes.ULONG),
+        ("OnLinkPrefixLength", ctypes.c_ubyte),
+    ]
+
+    class IP_ADAPTER_ADDRESSES(ctypes.Structure):
+        pass
+
+    IP_ADAPTER_ADDRESSES._fields_ = [
+        ("Length", wintypes.ULONG),
+        ("IfIndex", wintypes.DWORD),
+        ("Next", ctypes.POINTER(IP_ADAPTER_ADDRESSES)),
+        ("AdapterName", ctypes.c_char_p),
+        ("FirstUnicastAddress", ctypes.POINTER(IP_ADAPTER_UNICAST_ADDRESS)),
+        ("FirstAnycastAddress", ctypes.c_void_p),
+        ("FirstMulticastAddress", ctypes.c_void_p),
+        ("FirstDnsServerAddress", ctypes.c_void_p),
+        ("DnsSuffix", ctypes.c_wchar_p),
+        ("Description", ctypes.c_wchar_p),
+        ("FriendlyName", ctypes.c_wchar_p),
+        ("PhysicalAddress", ctypes.c_ubyte * 8),
+        ("PhysicalAddressLength", wintypes.DWORD),
+        ("Flags", wintypes.DWORD),
+        ("Mtu", wintypes.DWORD),
+        ("IfType", wintypes.DWORD),
+        ("OperStatus", ctypes.c_int),
+        ("Ipv6IfIndex", wintypes.DWORD),
+        ("ZoneIndices", wintypes.DWORD * 16),
+        ("FirstPrefix", ctypes.c_void_p),
+    ]
+
+    flags = 0x0080      # GAA_FLAG_SKIP_ANYCAST | SKIP_MULTICAST | SKIP_DNS_SERVER
+    size = wintypes.ULONG(16384)
+    buf = ctypes.create_string_buffer(size.value)
+    for _ in range(3):
+        ret = iphlp.GetAdaptersAddresses(0, flags, None, buf, ctypes.byref(size))
+        if ret == 0:
+            break
+        if ret == 111:      # ERROR_BUFFER_OVERFLOW
+            buf = ctypes.create_string_buffer(size.value)
+            continue
+        return {}
+    if ret != 0:
+        return {}
+
+    ptr = ctypes.cast(buf, ctypes.POINTER(IP_ADAPTER_ADDRESSES))
+    while ptr:
+        ad = ptr.contents
+        name = ad.FriendlyName or ""
+        ua = ad.FirstUnicastAddress
+        while ua:
+            sa = ua.contents.Address
+            if sa.lpSockaddr and sa.iSockaddrLength >= 8:
+                # sockaddr_in: family(2) + port(2) + addr(4)
+                raw = ctypes.string_at(sa.lpSockaddr, sa.iSockaddrLength)
+                if len(raw) >= 8 and raw[0] == 2:      # AF_INET
+                    ip = ".".join(str(b) for b in raw[4:8])
+                    out[ip] = name
+            ua = ua.contents.Next
+        ptr = ad.Next
+    return out
+
+
+def _adapter_names():
+    """Map ip -> adapter alias. PowerShell first, ctypes API as fallback."""
+    out = _adapter_names_powershell()
+    if out:
+        return out
+    try:
+        return _adapter_names_ctypes()
+    except Exception:
+        return {}
 
 
 def list_adapters():
