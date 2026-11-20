@@ -37,6 +37,7 @@ a = Analysis(
         "game_state",
         "cheat_actions",
         "ai_peer",
+        "net_adapters",
         "ai_dialogue",
         "persona_power",
         "room_map",
