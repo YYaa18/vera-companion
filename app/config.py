@@ -80,6 +80,9 @@ DEFAULTS = {
     "auto_launch_assistant": True,
     "record_progress": True,
     "bubble_size": "normal",
+    # 说话时把游戏音量压低（类似 Discord 的语音激活）
+    "duck_game_audio": True,
+    "duck_level": 0.22,
     # AI 之间的对话
     "peer_enabled": False,
     "peer_is_host": True,
