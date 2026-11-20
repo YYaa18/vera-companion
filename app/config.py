@@ -76,6 +76,8 @@ DEFAULTS = {
     "help_level": "guide",
     "input_device": None,
     "output_device": None,
+    # 游戏目录（含 recvx.exe）。空 = 自动探测。
+    "game_dir": "",
     "iso_path": "",
     # 游戏联机的 8 位加入码（COPY JOIN ADDRESS 里 # 后面那串），用来拼完整地址
     "game_room_code": "",
@@ -124,6 +126,60 @@ def save(cfg):
         return True
     except Exception:
         return False
+
+
+def find_game_dir():
+    """Locate the folder holding recvx.exe.
+
+    The installer puts the assistant somewhere like Program Files while the
+    game lives wherever the user unpacked it, so guessing from our own path
+    usually fails. Check the obvious places, then let the caller ask.
+    """
+    candidates = []
+
+    cfg = load_cached() if "load_cached" in globals() else None
+    try:
+        cfg = cfg or load()
+        if cfg.get("game_dir"):
+            candidates.append(cfg["game_dir"])
+    except Exception:
+        pass
+
+    # 安装包把 recvx.exe 放在 app 目录下的 game 子目录里
+    if FROZEN:
+        candidates.append(os.path.join(HERE, "game"))
+    # 我们自己的位置（绿色版：exe 就在游戏目录里）
+    candidates.append(GAME_ROOT)
+    candidates.append(HERE)
+    if FROZEN:
+        candidates.append(os.path.dirname(os.path.abspath(sys.executable)))
+
+    # 常见安装位置
+    for drive in ("C", "D", "E", "F"):
+        for name in ("RE-CodeVeronica-PC", "RE-CVX", "recvx-enhanced-port",
+                     "ResidentEvilCVX"):
+            candidates.append(os.path.join(drive + ":\\", name))
+            candidates.append(os.path.join(drive + ":\\", "Games", name))
+
+    for c in candidates:
+        try:
+            if c and os.path.exists(os.path.join(c, "recvx.exe")):
+                return c
+        except Exception:
+            continue
+    return ""
+
+
+def resolve_game_dir():
+    """The game folder to use right now."""
+    try:
+        cfg = load()
+        if cfg.get("game_dir") and os.path.exists(
+                os.path.join(cfg["game_dir"], "recvx.exe")):
+            return cfg["game_dir"]
+    except Exception:
+        pass
+    return find_game_dir()
 
 
 def find_iso():
