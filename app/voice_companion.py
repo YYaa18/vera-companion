@@ -658,6 +658,17 @@ class App(QObject):
         if brief:
             msgs.append({"role": "system",
                          "content": "【实时游戏状态，可直接使用，不必问玩家】\n" + brief})
+            # 背包里物品的用途，避免它瞎编
+            try:
+                import item_knowledge
+                st = self.game.read()
+                if st and st.get("items"):
+                    kb = item_knowledge.knowledge_block(
+                        [it["id"] for it in st["items"]])
+                    if kb:
+                        msgs.append({"role": "system", "content": kb})
+            except Exception:
+                pass
         if self.dialogue and self.dialogue.enabled:
             try:
                 import ai_dialogue
