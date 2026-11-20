@@ -577,6 +577,7 @@ UU 同一个房间里直接就能连，不用动路由器。""")
         # 线路选择：默认自动，认出 UU 就用 UU
         self.peer_adapter = QComboBox()
         self.peer_adapters = []
+        self._finding = False
         try:
             import net_adapters
             self.peer_adapters = net_adapters.friendly_rows()
@@ -606,10 +607,21 @@ UU 同一个房间里直接就能连，不用动路由器。""")
         self.peer_adapter.setStyleSheet(edit_style)
         self._peer_preset_ip = auto_ip
 
+        # 加入方：先试自动发现，找不到再手填
+        remote_row = QHBoxLayout()
+        remote_row.setSpacing(6)
         self.peer_remote = QLineEdit(self.cfg.get("peer_remote", ""))
-        self.peer_remote.setPlaceholderText("对方的 IP，例如 203.0.113.5")
+        self.peer_remote.setPlaceholderText("点右边自动找，或手动填房主地址")
         self.peer_remote.setMinimumHeight(30)
         self.peer_remote.setStyleSheet(edit_style)
+        remote_row.addWidget(self.peer_remote, 1)
+
+        self.peer_find_btn = QPushButton("自动找队友")
+        self.peer_find_btn.setFixedWidth(90)
+        self.peer_find_btn.setMinimumHeight(30)
+        self.peer_find_btn.clicked.connect(self._auto_find_peer)
+        self.peer_find_btn.setStyleSheet(self._btn_style(secondary=True))
+        remote_row.addWidget(self.peer_find_btn)
 
         self.peer_port = QLineEdit(str(self.cfg.get("peer_port", 7150)))
         self.peer_port.setFixedWidth(80)
@@ -621,7 +633,7 @@ UU 同一个房间里直接就能连，不用动路由器。""")
         grid.addWidget(lab("走哪条线路"), 1, 0)
         grid.addWidget(self.peer_adapter, 1, 1, 1, 3)
         grid.addWidget(lab("对方地址"), 2, 0)
-        grid.addWidget(self.peer_remote, 2, 1)
+        grid.addLayout(remote_row, 2, 1)
         grid.addWidget(lab("端口"), 2, 2)
         grid.addWidget(self.peer_port, 2, 3)
         grid.setColumnStretch(1, 1)
@@ -654,6 +666,47 @@ UU 同一个房间里直接就能连，不用动路由器。""")
         self.peer_port.textChanged.connect(self._peer_mode_changed)
         return card
 
+    def _auto_find_peer(self):
+        """Broadcast on the selected line and fill in whoever answers."""
+        if self._finding:
+            return
+        self._finding = True
+        self.peer_find_btn.setEnabled(False)
+        self.peer_find_btn.setText("搜索中…")
+
+        ip_hint = self.peer_adapter.currentData() or ""
+        if ip_hint == "__auto__":
+            ip_hint = getattr(self, "_peer_preset_ip", "")
+        port = 7150
+        try:
+            port = int(self.peer_port.text().strip() or 7150)
+        except ValueError:
+            pass
+        room = (self.game_room_code.text().strip().upper() or "")
+
+        def work():
+            try:
+                import ai_peer
+                found = ai_peer.discover_host(
+                    port=port, timeout=3.5, local_ip=ip_hint, room=room)
+            except Exception:
+                found = None
+            QTimer.singleShot(0, lambda: self._find_done(found))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _find_done(self, ip):
+        self._finding = False
+        self.peer_find_btn.setEnabled(True)
+        self.peer_find_btn.setText("自动找队友")
+        if ip:
+            self.peer_remote.setText(ip)
+            self.peer_hint_dynamic.setText(f"找到队友了：{ip}，点保存配置即可")
+        else:
+            self.peer_hint_dynamic.setText(
+                "没找到。确认双方都在同一个 UU 房间、「允许聊天」都勾上了，"
+                "或者手动填房主给你的地址。")
+
     def _peer_mode_changed(self, _i=None):
         is_host = self.peer_mode.currentIndex() == 0
         self.peer_remote.setEnabled(not is_host)
@@ -670,7 +723,7 @@ UU 同一个房间里直接就能连，不用动路由器。""")
                 self.peer_hint_dynamic.setText(
                     "没找到可用的网络，先连上网或开 UU 进房间后重开")
         else:
-            self.peer_remote.setPlaceholderText("填房主发给你的那串，例如 10.1.2.3")
+            self.peer_remote.setPlaceholderText("点右边自动找，或手动填房主地址")
             self.peer_hint_dynamic.setText(
                 "把房主发给你的地址填进来，端口保持和房主一样就行")
 
