@@ -121,17 +121,32 @@ def to_data_url(img, max_w=1000):
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-def chat(key, base, model, messages, max_tokens=400):
+def chat(key, base, model, messages, max_tokens=None):
+    """Send a chat request.
+
+    max_tokens=None means "don't send the field" — the server's default applies.
+    语音场景下模型常把额度花在内部推理上，卡上限会把正文截断，所以默认不限。
+    """
     import urllib.request
 
-    payload = {"model": model, "messages": messages, "max_tokens": max_tokens}
+    payload = {"model": model, "messages": messages}
+    if max_tokens:
+        payload["max_tokens"] = max_tokens
     req = urllib.request.Request(base + "/chat/completions",
                                  data=json.dumps(payload).encode(), method="POST")
     req.add_header("Content-Type", "application/json")
     req.add_header("Authorization", f"Bearer {key}")
     with urllib.request.urlopen(req, timeout=120) as r:
         d = json.loads(r.read().decode("utf-8", "replace"))
-    return d["choices"][0]["message"]["content"].strip()
+    ch = d["choices"][0]
+    text = (ch["message"].get("content") or "").strip()
+    if not text:
+        # 模型可能把额度花在内部推理上（finish_reason=length），
+        # 正文会是空的 —— 给用户一句能听懂的话，而不是空白。
+        if ch.get("finish_reason") == "length":
+            return "我刚才想太久了，没说出话来。再说一次？"
+        return "嗯……我没想好怎么回答。"
+    return text
 
 
 def clean_for_speech(text):
@@ -228,7 +243,9 @@ class App(QObject):
         super().__init__()
         self.app = app
         self.key, self.base, self.model, self.voice_id, self.in_dev, self.out_dev = load_credentials()
-        self.persona_key = (appcfg.load().get("persona") or "gentle")
+        _boot_cfg = appcfg.load()
+        self.persona_key = (_boot_cfg.get("persona") or "gentle")
+        self.help_level = (_boot_cfg.get("help_level") or "guide")
         self.persona = load_persona()
         self.history = []
         self.busy = False
@@ -355,7 +372,7 @@ class App(QObject):
                                   "发现了好东西），就用一句话转告他；"
                                   "没什么用就别说话，只回一个「嗯」也可以。")
                     msgs = self._build_messages(prompt)
-                    ans = chat(self.key, self.base, self.model, msgs, max_tokens=260)
+                    ans = chat(self.key, self.base, self.model, msgs)
                     reply = extract_ask(ans)
                     if reply:
                         self.dialogue.ask_peer(reply)
@@ -632,7 +649,7 @@ class App(QObject):
                     return
                 prompt = "看一下我的屏幕，用中文简单说说画面上是什么、我该做什么。口语，短一点。"
                 msgs = self._build_messages(prompt, img=img)
-                ans = chat(self.key, self.base, self.model, msgs, max_tokens=520)
+                ans = chat(self.key, self.base, self.model, msgs)
                 self._handle_action(ans)
                 self._speak(ans)
             except Exception as e:
@@ -658,6 +675,23 @@ class App(QObject):
         if brief:
             msgs.append({"role": "system",
                          "content": "【实时游戏状态，可直接使用，不必问玩家】\n" + brief})
+            # 按辅助程度注入攻略笔记
+            try:
+                import help_level as hl
+                import walkthrough
+                msgs.append({"role": "system",
+                             "content": hl.prompt_for_persona(
+                                 self.help_level, self.persona_key)})
+                st_now = self.game.read()
+                if st_now and st_now.get("in_game"):
+                    wb = walkthrough.block_for(
+                        st_now.get("stage", 0), self.help_level,
+                        self.persona_key)
+                    if wb:
+                        msgs.append({"role": "system", "content": wb})
+            except Exception:
+                pass
+
             # 背包里物品的用途，避免它瞎编
             try:
                 import item_knowledge
@@ -739,7 +773,7 @@ class App(QObject):
             try:
                 msgs = self._build_messages(text)
                 print('[ask] 请求中…', flush=True)
-                ans = chat(self.key, self.base, self.model, msgs, max_tokens=520)
+                ans = chat(self.key, self.base, self.model, msgs)
                 print(f'[ask] 收到 {len(ans)} 字', flush=True)
                 self.history.append({"role": "user", "content": "(玩家说话)" if silent else text})
                 self.history.append({"role": "assistant", "content": ans})
