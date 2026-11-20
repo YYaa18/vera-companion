@@ -56,9 +56,20 @@ class Dialogue:
             "time": time.time(),
         })
 
-    def ask_peer(self, question):
-        """玩家要求：向对面的 AI 提问。"""
-        return self._send(question or "你那边现在什么情况？", "query")
+    def ask_peer(self, question, ref=""):
+        """玩家要求：向对面的 AI 提问。
+
+        ref 是本地生成的短标识，对面回话时带回来，方便把回答对上是哪个问题。
+        """
+        text = question or "你那边现在什么情况？"
+        ok = self._send(text, "query")
+        if ok:
+            self._pending_query = {"text": text, "ref": ref}
+        return ok
+
+    def answer_peer(self, answer, ref=""):
+        """回应对面的提问。走 "answer" 类型，对面收到就会转告自己的玩家。"""
+        return self._send(answer or "我这边还好。", "answer")
 
     def _report(self, text):
         return self._send(text, "event")
@@ -161,18 +172,36 @@ class Dialogue:
 
 def build_peer_context(persona_prompt=""):
     """System prompt addition explaining the peer channel."""
-    parts = [persona_prompt] if persona_prompt else []
-    parts.append("""【你和另一个 AI 之间的通道】
-对面那个 AI 也在陪另一个玩家玩同一个游戏（你们在联机）。
-它只看得到它那边玩家的状态，你看得到你这边的——所以你们互补。
+    L = []
+    if persona_prompt:
+        L.append(persona_prompt)
 
-规则：
-- 你们不闲聊，只在有实事时说话。对面发来的消息会以【对面】出现。
-- 对面问你情况时，直接答你这边玩家的血量、位置、背包，别绕弯。
-- 对面说它那边的事，你可以决定要不要转告你这边玩家。
-  值得说的（对面快死了、对面卡住了、对面刚捡到好东西）就说一句，
-  不值得说（对面前面那间房有个空箱子）就别打扰他。
-- 你要是想主动问对面，可以在回复最后单独一行写：
-  [[ASK]]对面那边怎么样了？[[/ASK]]
-  系统会把问题发过去，对面的回答会在下一轮告诉你。""")
-    return "\n\n".join(parts)
+    L.append("【你和另一个 AI 之间的通道】")
+    L.append("对面那个 AI 也在陪另一个玩家玩同一个游戏（你们在联机）。")
+    L.append("它只看得到它那边玩家的状态，你看得到你这边的——所以你们互补。")
+    L.append("")
+    L.append("规则：")
+    L.append("- 你们不闲聊，只在有实事时说话。对面发来的消息会以【对面】出现。")
+    L.append("- 对面问你情况时，直接答你这边玩家的血量、位置、背包，别绕弯。")
+    L.append("- 对面说它那边的事，你可以决定要不要转告你这边玩家。")
+    L.append("  值得说的（对面快死了、对面卡住了、对面刚捡到好东西）就说一句，")
+    L.append("  不值得说（对面前面那间房有个空箱子）就别打扰他。")
+    L.append("")
+    L.append("【怎么真的去问对面 —— 这条最容易做错】")
+    L.append("玩家说「问问队友在哪」「问问他那边什么情况」「问问对面」这类话时，")
+    L.append("你必须真的把问题发出去，而不是只在嘴上说「好我去问问」。")
+    L.append("")
+    L.append("做法：在你回复的最后，单独一行写这个标记：")
+    L.append("")
+    L.append("[[ASK]]你现在在哪？血还剩多少？[[/ASK]]")
+    L.append("")
+    L.append("系统会自动把这句发给对面的 AI。对面会用它的真实状态回答，")
+    L.append("那个回答会回到你这里，你再转告玩家。")
+    L.append("")
+    L.append("要点：")
+    L.append("- 只说一句你要问的话，不要写成对话格式。")
+    L.append("- 玩家让你问什么就问什么，别自己改意思。")
+    L.append("- 写完这个标记后，正文只要说「我去问问」就够了，绝对不要编造答案。")
+    L.append("- 没连上对面时系统会告诉你，如实跟玩家说。")
+
+    return chr(10).join(L)
