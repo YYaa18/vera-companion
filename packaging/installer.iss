@@ -52,8 +52,11 @@ Source: "..\dist\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\app\personas\*.txt"; DestDir: "{app}\personas"; Flags: ignoreversion
 ; 同步上游的工具
 Source: "..\tools\sync_upstream.py"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "..\tools\relocate_gcheat.py"; DestDir: "{app}\tools"; Flags: ignoreversion
 ; 文档
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
+Source: "..\update\UU_LANPLAY.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\update\UPSTREAM.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 
 [Dirs]
 ; 用户数据目录（安装时就要存在，方便放配置）
