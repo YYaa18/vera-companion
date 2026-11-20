@@ -252,45 +252,133 @@ class Peer:
 
 # ---------------------------------------------------------------- LAN discovery
 
-def discover_host(port=DEFAULT_PORT, timeout=2.0):
-    """Broadcast on the LAN and return the first assistant that answers."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    s.settimeout(timeout)
+# ---------------------------------------------------------------- 局域网发现
+
+DISCOVER_MAGIC = b"VERA_AI_DISCOVER"
+REPLY_MAGIC = b"VERA_AI_HERE"
+
+
+def _subnet_broadcasts(ip):
+    """Broadcast addresses for the /24 the given IP sits in.
+
+    Sending to 255.255.255.255 goes out of every interface at once, which on a
+    machine with VMware or similar virtual adapters lands on the wrong one.
+    Targeting the /24 broadcast of a specific adapter keeps it on that line.
+    """
     try:
-        s.sendto(b"VERA_AI_DISCOVER", ("255.255.255.255", port + 1))
-        data, addr = s.recvfrom(256)
-        if data.startswith(b"VERA_AI_HERE"):
-            return addr[0]
+        parts = ip.split(".")
+        if len(parts) == 4:
+            return [f"{parts[0]}.{parts[1]}.{parts[2]}.255"]
     except Exception:
         pass
+    return []
+
+
+def discover_host(port=DEFAULT_PORT, timeout=2.0, local_ip="", room="",
+                  on_status=None):
+    """Look for another assistant on the same network.
+
+    local_ip picks which adapter to broadcast on (the UU one). room, when set,
+    filters out assistants from a different co-op session.
+    Returns the host's IP, or None.
+    """
+    targets = _subnet_broadcasts(local_ip) if local_ip else []
+    targets.append("255.255.255.255")
+
+    payload = DISCOVER_MAGIC
+    if room:
+        payload += b"|" + room.encode("utf-8", "replace")[:40]
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.settimeout(timeout)
+    try:
+        if local_ip:
+            try:
+                sock.bind((local_ip, 0))
+            except OSError:
+                pass
+        for target in targets:
+            try:
+                sock.sendto(payload, (target, port + 1))
+                if on_status:
+                    on_status(f"正在 {target} 上找队友…")
+            except OSError:
+                continue
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                data, addr = sock.recvfrom(512)
+            except socket.timeout:
+                break
+            except OSError:
+                break
+            if not data.startswith(REPLY_MAGIC):
+                continue
+            # 回应格式：MAGIC|ip|port|room
+            try:
+                body = data.decode("utf-8", "replace").split("|")
+                if room and len(body) >= 4 and body[3] and body[3] != room:
+                    continue        # 不是同一个房间的
+                return body[1] if len(body) >= 2 and body[1] else addr[0]
+            except Exception:
+                return addr[0]
     finally:
-        s.close()
+        sock.close()
     return None
 
 
-def answer_discovery(port=DEFAULT_PORT, on_found=None):
-    """Reply to LAN discovery broadcasts so the other side can find us."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+def answer_discovery(port=DEFAULT_PORT, local_ip="", room="", on_found=None,
+                     stop_flag=None):
+    """Listen for discovery probes and answer with our own address.
+
+    Runs until stop_flag() returns True (or forever when not given).
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    bind_ip = local_ip or "0.0.0.0"
     try:
-        s.bind(("0.0.0.0", port + 1))
-    except Exception:
-        return None
-    s.settimeout(1.0)
+        sock.bind((bind_ip, port + 1))
+    except OSError:
+        try:
+            sock.bind(("0.0.0.0", port + 1))
+        except OSError:
+            return None
+    sock.settimeout(1.0)
 
     def loop():
         while True:
+            if stop_flag and stop_flag():
+                break
             try:
-                data, addr = s.recvfrom(256)
-                if data.startswith(b"VERA_AI_DISCOVER"):
-                    s.sendto(b"VERA_AI_HERE", addr)
-                    if on_found:
-                        on_found(addr[0])
+                data, addr = sock.recvfrom(512)
             except socket.timeout:
                 continue
             except OSError:
                 break
+            if not data.startswith(DISCOVER_MAGIC):
+                continue
+            want_room = ""
+            if b"|" in data:
+                want_room = data.split(b"|", 1)[1].decode("utf-8", "replace")
+            if want_room and room and want_room != room:
+                continue            # 不是同一个房间，不答
+            reply = (REPLY_MAGIC + b"|" + (local_ip or "").encode() + b"|" +
+                     str(port).encode() + b"|" + room.encode("utf-8", "replace"))
+            try:
+                sock.sendto(reply, addr)
+            except OSError:
+                pass
+            if on_found:
+                try:
+                    on_found(addr[0])
+                except Exception:
+                    pass
+        try:
+            sock.close()
+        except Exception:
+            pass
 
     threading.Thread(target=loop, daemon=True).start()
-    return s
+    return sock
+
