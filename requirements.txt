@@ -6,6 +6,8 @@ pywin32>=306
 sounddevice>=0.4.6
 numpy>=1.24
 keyboard>=0.13
+pycaw>=20230407
+comtypes>=1.2
 
 # 打包（可选）
 pyinstaller>=6.0
