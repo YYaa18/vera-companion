@@ -75,6 +75,8 @@ DEFAULTS = {
     "input_device": None,
     "output_device": None,
     "iso_path": "",
+    # 游戏联机的 8 位加入码（COPY JOIN ADDRESS 里 # 后面那串），用来拼完整地址
+    "game_room_code": "",
     "auto_launch_assistant": True,
     "record_progress": True,
     "bubble_size": "normal",
@@ -83,6 +85,9 @@ DEFAULTS = {
     "peer_is_host": True,
     "peer_remote": "",
     "peer_port": 7150,
+    # 房主监听的网卡 IP。空 = 所有网卡（0.0.0.0）。
+    # 虚拟局域网下建议显式指定，避免广播落到 VMware 之类的虚拟网卡上。
+    "peer_local_ip": "",
     "peer_name": "小蓝",
 }
 
