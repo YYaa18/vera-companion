@@ -232,6 +232,7 @@ class App(QObject):
         self.persona = load_persona()
         self.history = []
         self.busy = False
+        self._busy_since = 0.0
         self.muted = False
 
         # 能力档位：呆萌/温柔只能看，鬼灵精怪给建议，邪恶能动手
@@ -519,6 +520,16 @@ class App(QObject):
             self.player.stop()
 
     def toggle_listen(self):
+        # 自愈：busy 卡住超过 45 秒就强制放开（TTS/网络挂起时会出现）
+        if self.busy and (time.time() - getattr(self, "_busy_since", 0)) > 45:
+            print("[recover] busy 卡死，强制复位", flush=True)
+            try:
+                self.player.stop()
+            except Exception:
+                pass
+            self.busy = False
+            self.pet.set_state("idle")
+
         if self.busy:
             self.say("等我一下，我还在想。")
             return
@@ -553,13 +564,22 @@ class App(QObject):
         if not getattr(self, "_listening", False):
             return
         self._listening = False
-        wav = self.recorder.stop()
+        try:
+            wav = self.recorder.stop()
+        except Exception as e:
+            wav = None
+            print(f"[rec] 停止录音出错：{e}", flush=True)
+
+        if not wav:
+            # 没录到东西：直接回待机，别留个"…"挂着
+            self._set_busy(False)
+            self.pet.set_state("idle")
+            self._show_bubble("没听到声音，再说一次？", seconds=3.5)
+            return
+
         self.pet.set_state("thinking")
         self._show_bubble("…", seconds=999)
-        if not wav:
-            self.pet.set_state("idle")
-            return
-        self.busy = True
+        self._set_busy(True)
 
         def work():
             try:
@@ -584,7 +604,7 @@ class App(QObject):
         if self.busy:
             self.say("等下，我还在忙。")
             return
-        self.busy = True
+        self._set_busy(True)
         self.pet.set_state("thinking")
         self._show_bubble("我看看你屏幕…", seconds=999)
 
@@ -682,9 +702,11 @@ class App(QObject):
             pass
 
     def _ask(self, text, silent=False):
-        self.busy = True
-        self.pet.set_state("thinking")
-        self._show_bubble("…", seconds=999)
+        # 这个方法可能从工作线程进来（录音识别完成后），
+        # 所以 UI 操作一律通过 _ui 派发。
+        self._set_busy(True)
+        self._ui(lambda: self.pet.set_state("thinking"))
+        self._ui(lambda: self._show_bubble("…", seconds=999))
 
         def work():
             try:
@@ -752,13 +774,21 @@ class App(QObject):
             pass
 
     def _start_playing(self, wav, text):
-        self.busy = False
+        # 可能从工作线程调用 —— 一律回到 UI 线程再碰控件
+        self._ui(lambda: self._start_playing_ui(wav, text))
+
+    def _start_playing_ui(self, wav, text):
+        self._set_busy(False)
         self.pet.set_state("talking")
         self.player.play(wav)
         self._last_text = text
 
     def _done(self, text):
-        self.busy = False
+        # 同上：工作线程调用时不能直接改控件
+        self._ui(lambda: self._done_ui(text))
+
+    def _done_ui(self, text):
+        self._set_busy(False)
         self.pet.set_state("idle")
         self._last_text = text
 
@@ -767,6 +797,12 @@ class App(QObject):
             fn()
         except Exception as e:
             print(f'[ui] {type(e).__name__}: {e}', flush=True)
+
+    def _set_busy(self, value):
+        """Single place that flips busy, so the stuck-timeout can work."""
+        self.busy = value
+        if value:
+            self._busy_since = time.time()
 
     def _ui(self, fn):
         """Run fn on the UI thread, from any thread."""
@@ -823,6 +859,14 @@ class App(QObject):
 
 
 def main():
+    # 崩溃/卡死时把线程堆栈写到文件，便于排查
+    try:
+        import faulthandler
+        _fh = open(os.path.join(HERE, "threads.log"), "w")
+        faulthandler.dump_traceback_later(20, repeat=True, file=_fh)
+    except Exception:
+        pass
+
     import ctypes
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
