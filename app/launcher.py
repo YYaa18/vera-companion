@@ -311,10 +311,42 @@ class Launcher(QMainWindow):
         )
         grid.addWidget(self.bubble_size_box, 5, 1, 1, 3)
 
+        # 辅助程度
+        grid.addWidget(lab("辅助"), 6, 0)
+        self.help_box = QComboBox()
+        try:
+            import help_level
+            for key, label, desc in help_level.choices():
+                self.help_box.addItem(label, key)
+                self.help_box.setItemData(self.help_box.count() - 1,
+                                          desc, Qt.ToolTipRole)
+        except Exception:
+            self.help_box.addItem("引导", "guide")
+        cur_help = self.cfg.get("help_level", "guide")
+        for i in range(self.help_box.count()):
+            if self.help_box.itemData(i) == cur_help:
+                self.help_box.setCurrentIndex(i)
+                break
+        self.help_box.setMinimumHeight(32)
+        self.help_box.setStyleSheet(
+            f"background:{CARD2};color:{FG};border:1px solid #2f3441;"
+            "border-radius:7px;padding:4px 8px;"
+        )
+        grid.addWidget(self.help_box, 6, 1, 1, 3)
+
+        self.help_hint = QLabel("")
+        self.help_hint.setWordWrap(True)
+        self.help_hint.setFont(QFont("Microsoft YaHei", 8))
+        self.help_hint.setStyleSheet(
+            f"color:{DIM};border:none;background:transparent;")
+        grid.addWidget(self.help_hint, 7, 1, 1, 3)
+        self._help_changed()
+        self.help_box.currentIndexChanged.connect(self._help_changed)
+
         self.duck_check = QCheckBox("说话时自动压低游戏音量（避免两个声音打架）")
         self.duck_check.setChecked(bool(self.cfg.get("duck_game_audio", True)))
         self._style_check(self.duck_check)
-        grid.addWidget(self.duck_check, 6, 0, 1, 4)
+        grid.addWidget(self.duck_check, 8, 0, 1, 4)
 
         grid.setColumnStretch(1, 1)
         grid.setColumnMinimumWidth(0, 70)
@@ -323,7 +355,7 @@ class Launcher(QMainWindow):
         self.persona_hint.setWordWrap(True)
         self.persona_hint.setFont(QFont("Microsoft YaHei", 8))
         self.persona_hint.setStyleSheet(f"color:{DIM};border:none;background:transparent;")
-        grid.addWidget(self.persona_hint, 7, 1, 1, 3)
+        grid.addWidget(self.persona_hint, 9, 1, 1, 3)
         self._persona_changed()
 
         card.lay.addLayout(grid)
@@ -716,6 +748,15 @@ class Launcher(QMainWindow):
         path.addRoundedRect(QRectF(0, 0, w, h), r, r)
         return path
 
+    def _help_changed(self, _i=None):
+        """Show the chosen help level's description."""
+        key = self.help_box.currentData() or "guide"
+        try:
+            import help_level
+            self.help_hint.setText(help_level.describe(key))
+        except Exception:
+            self.help_hint.setText("")
+
     def _style_check(self, box):
         """Fusion draws an invisible indicator on dark backgrounds; draw our own.
 
@@ -771,6 +812,7 @@ class Launcher(QMainWindow):
         self.cfg["record_progress"] = self.record_progress.isChecked()
         self.cfg["bubble_size"] = self.bubble_size_box.currentData()
         self.cfg["duck_game_audio"] = self.duck_check.isChecked()
+        self.cfg["help_level"] = self.help_box.currentData() or "guide"
         self.cfg["peer_enabled"] = self.peer_enabled.isChecked()
         self.cfg["peer_is_host"] = self.peer_mode.currentIndex() == 0
         self.cfg["peer_remote"] = self.peer_remote.text().strip()
