@@ -147,8 +147,8 @@ class Launcher(QMainWindow):
         self.assist_proc = None
         self.setWindowTitle("维罗妮卡 X · 启动器")
         self.setWindowIcon(QIcon(fish_icon(64)))
-        self.resize(680, 780)
-        self.setMinimumSize(620, 520)
+        self.resize(760, 820)
+        self.setMinimumSize(680, 540)
         self.setStyleSheet(f"QMainWindow{{background:{BG};}}")
         self.test_result.connect(self._test_done)
 
@@ -487,10 +487,36 @@ class Launcher(QMainWindow):
         self.game_room_code.setMinimumHeight(30)
         self.game_room_code.setStyleSheet(edit_style)
 
-        grid.addWidget(lab2("联机线路"), 0, 0)
-        grid.addWidget(self.game_net_adapter, 0, 1, 1, 2)
-        grid.addWidget(lab2("加入码"), 1, 0)
-        grid.addWidget(self.game_room_code, 1, 1, 1, 2)
+        # 游戏目录（安装版和游戏是分开装的，必须让用户指路）
+        dir_row = QHBoxLayout()
+        dir_row.setSpacing(6)
+        self.game_dir_label = QLabel(
+            config.resolve_game_dir() or "（还没设置，点右边选）")
+        self.game_dir_label.setWordWrap(True)
+        self.game_dir_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.game_dir_label.setFont(QFont("Microsoft YaHei", 8))
+        self.game_dir_label.setStyleSheet(
+            f"color:{FG if config.resolve_game_dir() else WARN};"
+            "font-size:11px;border:none;background:transparent;")
+        dir_row.addWidget(self.game_dir_label, 1)
+
+        game_dir_btn = QPushButton("游戏在哪…")
+        game_dir_btn.setFixedWidth(80)
+        game_dir_btn.setMinimumHeight(28)
+        game_dir_btn.clicked.connect(self.pick_game_dir)
+        game_dir_btn.setStyleSheet(self._btn_style(secondary=True))
+        dir_row.addWidget(game_dir_btn)
+
+        dir_lab = QLabel("游戏目录")
+        dir_lab.setFont(QFont("Microsoft YaHei", 9))
+        dir_lab.setStyleSheet(f"color:{DIM};border:none;background:transparent;")
+
+        grid.addWidget(dir_lab, 0, 0)
+        grid.addLayout(dir_row, 0, 1, 1, 3)
+        grid.addWidget(lab2("联机线路"), 1, 0)
+        grid.addWidget(self.game_net_adapter, 1, 1, 1, 2)
+        grid.addWidget(lab2("加入码"), 2, 0)
+        grid.addWidget(self.game_room_code, 2, 1, 1, 2)
         grid.setColumnStretch(1, 1)
         card.lay.addLayout(grid)
 
@@ -986,6 +1012,29 @@ UU 同一个房间里直接就能连，不用动路由器。""")
         self.api_status.setText(msg)
         self.api_status.setStyleSheet(f"color:{col};font-size:11px;border:none;")
 
+    def pick_game_dir(self):
+        """Let the user point at the folder that holds recvx.exe."""
+        cur = config.resolve_game_dir() or config.GAME_ROOT
+        d = QFileDialog.getExistingDirectory(
+            self, "选择游戏所在的文件夹（里面有 recvx.exe）",
+            cur if os.path.isdir(cur) else os.path.expanduser("~"))
+        if not d:
+            return
+        if not os.path.exists(os.path.join(d, "recvx.exe")):
+            QMessageBox.warning(
+                self, "这个文件夹里没有游戏",
+                "选中的文件夹里没有 recvx.exe。\n\n"
+                "请选游戏本体所在的文件夹（就是那个解压出来的、"
+                "里面有 recvx.exe 的）。"
+            )
+            return
+        self.cfg["game_dir"] = d
+        config.save(self.cfg)
+        self.game_dir_label.setText(d)
+        self.game_dir_label.setStyleSheet(
+            f"color:{OK};font-size:11px;border:none;")
+        self.status.setText("游戏目录已设置")
+
     def pick_iso(self):
         start = os.path.dirname(self.iso_edit.text()) or config.GAME_ROOT
         path, _ = QFileDialog.getOpenFileName(
@@ -1029,9 +1078,20 @@ UU 同一个房间里直接就能连，不用动路由器。""")
         iso = cfg["iso_path"]
         exe = self._exe()
 
-        if not os.path.exists(exe):
-            QMessageBox.critical(self, "出错", f"找不到游戏程序：\n{exe}")
+        if not exe or not os.path.exists(exe):
+            msg = (
+                "启动器不知道游戏装在哪儿。" + chr(10) + chr(10) +
+                "两种情况：" + chr(10) +
+                "· 已经装了游戏 → 点「是」，选那个含 recvx.exe 的文件夹" + chr(10) +
+                r"· 还没装 → 点「否」，然后跑 tools\sync_upstream.py --update 下载本体" + chr(10) + chr(10) +
+                "现在去选游戏文件夹吗？"
+            )
+            reply = QMessageBox.question(self, "还没找到游戏", msg,
+                                         QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.pick_game_dir()
             return
+
         if not iso or not os.path.exists(iso):
             QMessageBox.warning(self, "缺少镜像",
                                 "请先选择 PS2 游戏镜像（美版 SLUS-20184）。")
