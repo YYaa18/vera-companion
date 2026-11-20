@@ -15,6 +15,18 @@ import time
 
 DEFAULT_PORT = 7150
 
+
+def _advertise_ip():
+    """The address the host should tell the other player to connect to."""
+    try:
+        import net_adapters
+        ip, _alias = net_adapters.guess_virtual_lan()
+        if ip:
+            return ip
+        return net_adapters.best_local_ip() or "0.0.0.0"
+    except Exception:
+        return "0.0.0.0"
+
 # ---------------------------------------------------------------- 防失控
 
 class Limits:
@@ -136,11 +148,17 @@ class Peer:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind((self.host, self.port))
+            try:
+                s.bind((self.host, self.port))
+            except OSError as e:
+                self.on_status(f"端口 {self.port} 绑定失败（{e}）——换个端口，或关掉占用它的程序")
+                return
             s.listen(1)
             s.settimeout(1.0)
             self.sock = s
-            self.on_status(f"等待对方连接（端口 {self.port}）")
+            # 告诉玩家自己该被连的地址，虚拟局域网下就是 UU 分配的那个
+            shown = self.host if self.host not in ("0.0.0.0", "") else _advertise_ip()
+            self.on_status(f"等待连接 — 让对方填 {shown}:{self.port}")
             while self.running:
                 try:
                     conn, addr = s.accept()
