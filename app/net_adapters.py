@@ -146,3 +146,99 @@ if __name__ == "__main__":
     else:
         print("没识别出虚拟局域网网卡（UU 未启动时正常）")
     print(f"建议默认地址: {best_local_ip()}")
+
+
+# ============================================================
+# 以下给启动器用：把技术细节翻译成人话
+# ============================================================
+
+# 明确值得推荐的虚拟局域网工具（按优先级）
+VLAN_HINTS = [
+    ("uu", "UU 加速器的联机房间"),
+    ("uu lanplay", "UU 加速器的联机房间"),
+    ("tailscale", "Tailscale 虚拟局域网"),
+    ("zerotier", "ZeroTier 虚拟局域网"),
+    ("hamachi", "Hamachi 虚拟局域网"),
+    ("radmin", "Radmin VPN 虚拟局域网"),
+    ("游戏加加", "游戏加加组网"),
+]
+
+IGNORE_HINTS = ("vmware", "vmnet", "virtualbox", "vbox", "hyper-v",
+                "vethernet", "docker", "wsl", "loopback", "wi-fi direct",
+                "蓝牙", "bluetooth")
+
+
+def friendly_rows():
+    """Like list_adapters(), but each row explains itself in plain language.
+
+    Returns [(ip, alias, kind, label, recommended)] sorted with the best
+    candidate first. label is what a non-technical user should read.
+    """
+    rows = list_adapters()
+    out = []
+    vlan_ip, vlan_alias = guess_virtual_lan()
+
+    for ip, alias, kind in rows:
+        low = alias.lower()
+
+        # 明确该忽略的（虚拟机、Docker 之类）
+        if any(h in low for h in IGNORE_HINTS):
+            out.append((ip, alias, kind, "（虚拟机用，一般不用选）", False))
+            continue
+
+        # 识别虚拟局域网工具
+        matched = None
+        for hint, human in VLAN_HINTS:
+            if hint in low:
+                matched = human
+                break
+        if matched:
+            out.append((ip, alias, kind, f"{matched} — 联机时选这个", True))
+            continue
+
+        # 物理网卡
+        if kind == "lan":
+            out.append((ip, alias, kind, "家里的路由器 / WiFi", False))
+        elif kind == "public":
+            out.append((ip, alias, kind, "直接连公网", False))
+        else:
+            out.append((ip, alias, kind, "（没连上网络）", False))
+
+    # 推荐的排最前
+    out.sort(key=lambda r: (not r[4], r[0]))
+    return out
+
+
+def best_guess():
+    """(ip, human_label) — what to preselect, in plain words.
+
+    Priority: a recognised virtual-LAN adapter > any private address >
+    whatever the default route uses.
+    """
+    rows = friendly_rows()
+    for ip, alias, kind, label, rec in rows:
+        if rec:
+            return ip, label
+    for ip, alias, kind, label, rec in rows:
+        if kind == "lan":
+            return ip, label
+    if rows:
+        return rows[0][0], rows[0][3]
+    return "", ""
+
+
+def status_summary():
+    """One sentence for the launcher: what did we find, what should the user do."""
+    rows = friendly_rows()
+    vlan = [r for r in rows if r[4]]
+    if vlan:
+        ip, alias, kind, label, _ = vlan[0]
+        return ("ok", f"已找到 {label}，地址 {ip}。把这个地址发给队友就行。")
+
+    has_router = any(r[2] == "lan" and not r[4] and "虚拟机" not in r[3]
+                     for r in rows)
+    if has_router:
+        return ("warn",
+                "没找到 UU 的联机网卡。如果你们用 UU 联机，"
+                "请先在 UU 里进同一个房间，然后重启这个启动器。")
+    return ("warn", "没检测到可用的网络连接，请先连上网。")
