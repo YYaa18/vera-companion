@@ -437,24 +437,33 @@ class Launcher(QMainWindow):
         self.game_net_adapter = QComboBox()
         try:
             import net_adapters
-            rows = net_adapters.list_adapters()
+            rows = net_adapters.friendly_rows()
+            preset_ip, preset_label = net_adapters.best_guess()
         except Exception:
-            rows = []
+            rows, preset_ip, preset_label = [], "", ""
         self._game_adapters = rows
-        for ip, alias, kind in rows:
-            tag = {"lan": "局域网", "public": "公网", "link-local": "未配置"}.get(kind, "")
-            self.game_net_adapter.addItem(f"{ip}  ({alias}, {tag})", ip)
-        if not rows:
-            self.game_net_adapter.addItem("（没检测到网卡）", "")
+        self.game_net_adapter.addItem("自动选择（推荐）", "__auto__")
+        for ip, alias, kind, label, rec in rows:
+            self.game_net_adapter.addItem(f"{ip} — {label}", ip)
+        # 默认停在「自动」，除非用户之前手动选过
+        saved_ip = self.cfg.get("game_local_ip") or ""
+        idx = 0
+        if saved_ip:
+            for i in range(self.game_net_adapter.count()):
+                if self.game_net_adapter.itemData(i) == saved_ip:
+                    idx = i
+                    break
+        self.game_net_adapter.setCurrentIndex(idx)
         self.game_net_adapter.setMinimumHeight(30)
         self.game_net_adapter.setStyleSheet(edit_style)
+        self._preset_ip = preset_ip
 
         self.game_room_code = QLineEdit(self.cfg.get("game_room_code", ""))
         self.game_room_code.setPlaceholderText("游戏里 COPY JOIN ADDRESS 得到的 8 位加入码")
         self.game_room_code.setMinimumHeight(30)
         self.game_room_code.setStyleSheet(edit_style)
 
-        grid.addWidget(lab2("我的地址"), 0, 0)
+        grid.addWidget(lab2("联机线路"), 0, 0)
         grid.addWidget(self.game_net_adapter, 0, 1, 1, 2)
         grid.addWidget(lab2("加入码"), 1, 0)
         grid.addWidget(self.game_room_code, 1, 1, 1, 2)
@@ -492,8 +501,10 @@ class Launcher(QMainWindow):
         return card
 
     def _game_addr(self):
-        """Build ip:7140#CODE from the chosen adapter and the join code."""
+        """Build ip:7140#CODE from the chosen line and the join code."""
         ip = self.game_net_adapter.currentData() or ""
+        if ip == "__auto__":
+            ip = self._preset_ip
         code = self.game_room_code.text().strip().upper()
         if not ip:
             return ""
@@ -514,17 +525,19 @@ class Launcher(QMainWindow):
                 f"color:{DIM};background:{CARD2};border:1px solid #2f3441;"
                 "border-radius:7px;padding:6px 9px;")
 
-        # 有没有识别到 UU
-        uu = any("uu" in alias.lower() for _ip, alias, _k in self._game_adapters)
-        if uu:
-            self.game_net_hint.setText(
-                "把上面这行发给对方。UU 同房间内直接用，不需要开端口转发。\n"
-                "加入方：MULTIPLAYER → Direct → JOIN A GAME → 把整行粘进 ADDRESS。")
+        # 认出了 UU 就走 UU 的说明
+        uu_found = any(row[4] for row in getattr(self, "_game_adapters", []))
+        if addr and uu_found:
+            self.game_net_hint.setText("""① 把这行地址复制发给队友
+② 队友打开游戏 → MULTIPLAYER → Direct → JOIN A GAME，粘进 ADDRESS
+UU 同一个房间里直接就能连，不用动路由器。""")
+        elif addr:
+            self.game_net_hint.setText("""① 先照上面填加入码，再把这行地址发给队友
+② 队友打开游戏 → MULTIPLAYER → Direct → JOIN A GAME 粘进去
+⚠ 如果你们不在同一个 WiFi，先在 UU 加速器里进同一个房间，然后重开启动器。""")
         else:
             self.game_net_hint.setText(
-                "没检测到 UU Lanplay 网卡。用 UU 虚拟局域网联机的话，"
-                "请先在 UU 里进入同一个房间，然后重启本启动器。\n"
-                "不用 UU 的话，需要在路由器放行 UDP 7140 并填公网 IP。")
+                "没找到可用的网络。先连上网，或者开 UU 加速器进房间后重开启动器。")
 
     def _copy_game_addr(self):
         addr = self._game_addr()
@@ -561,29 +574,37 @@ class Launcher(QMainWindow):
         self.peer_mode.setMinimumHeight(30)
         self.peer_mode.setStyleSheet(edit_style)
 
-        # 网卡选择：虚拟局域网下必须走 UU 分配的那块网卡
+        # 线路选择：默认自动，认出 UU 就用 UU
         self.peer_adapter = QComboBox()
         self.peer_adapters = []
         try:
             import net_adapters
-            self.peer_adapters = net_adapters.list_adapters()
-            auto_ip, auto_alias = net_adapters.guess_virtual_lan()
+            self.peer_adapters = net_adapters.friendly_rows()
+            auto_ip, auto_label = net_adapters.best_guess()
         except Exception:
-            self.peer_adapters, auto_ip, auto_alias = [], None, None
+            self.peer_adapters, auto_ip, auto_label = [], "", ""
 
-        for ip, alias, kind in self.peer_adapters:
-            tag = {"lan": "局域网", "public": "公网", "link-local": "未配置"}.get(kind, "")
-            self.peer_adapter.addItem(f"{ip}  ({alias}, {tag})", ip)
-        if not self.peer_adapters:
-            self.peer_adapter.addItem("（没检测到网卡）", "")
-        else:
-            want = self.cfg.get("peer_local_ip") or auto_ip or ""
-            for i in range(self.peer_adapter.count()):
-                if self.peer_adapter.itemData(i) == want:
-                    self.peer_adapter.setCurrentIndex(i)
+        self.peer_adapter.addItem("自动选择（推荐）", "__auto__")
+        for ip, alias, kind, label, rec in self.peer_adapters:
+            self.peer_adapter.addItem(f"{ip} — {label}", ip)
+
+        # 之前存的地址如果现在是虚拟网卡（或已不存在），一律回到「自动」
+        want = self.cfg.get("peer_local_ip") or "__auto__"
+        if want != "__auto__":
+            still_good = False
+            for ip, alias, kind, label, rec in self.peer_adapters:
+                if ip == want and "虚拟机" not in label:
+                    still_good = True
                     break
+            if not still_good:
+                want = "__auto__"
+        for i in range(self.peer_adapter.count()):
+            if self.peer_adapter.itemData(i) == want:
+                self.peer_adapter.setCurrentIndex(i)
+                break
         self.peer_adapter.setMinimumHeight(30)
         self.peer_adapter.setStyleSheet(edit_style)
+        self._peer_preset_ip = auto_ip
 
         self.peer_remote = QLineEdit(self.cfg.get("peer_remote", ""))
         self.peer_remote.setPlaceholderText("对方的 IP，例如 203.0.113.5")
@@ -597,7 +618,7 @@ class Launcher(QMainWindow):
 
         grid.addWidget(lab("角色"), 0, 0)
         grid.addWidget(self.peer_mode, 0, 1, 1, 3)
-        grid.addWidget(lab("网卡"), 1, 0)
+        grid.addWidget(lab("走哪条线路"), 1, 0)
         grid.addWidget(self.peer_adapter, 1, 1, 1, 3)
         grid.addWidget(lab("对方地址"), 2, 0)
         grid.addWidget(self.peer_remote, 2, 1)
@@ -637,19 +658,21 @@ class Launcher(QMainWindow):
         is_host = self.peer_mode.currentIndex() == 0
         self.peer_remote.setEnabled(not is_host)
         ip = self.peer_adapter.currentData() or ""
+        if ip == "__auto__":
+            ip = getattr(self, "_peer_preset_ip", "") or ""
         port = self.peer_port.text().strip() or "7150"
 
         if is_host:
-            self.peer_remote.setPlaceholderText("房主不需要填，等对方连你")
+            self.peer_remote.setPlaceholderText("房主不用填，等对方连你")
             if ip:
-                self.peer_hint_dynamic.setText(
-                    f"把这句发给对方 →  {ip}:{port}")
+                self.peer_hint_dynamic.setText(f"把这个发给队友 →  {ip}:{port}")
             else:
-                self.peer_hint_dynamic.setText("没检测到网卡，无法确定自己地址")
+                self.peer_hint_dynamic.setText(
+                    "没找到可用的网络，先连上网或开 UU 进房间后重开")
         else:
-            self.peer_remote.setPlaceholderText("填房主那一串，例如 10.1.2.3")
+            self.peer_remote.setPlaceholderText("填房主发给你的那串，例如 10.1.2.3")
             self.peer_hint_dynamic.setText(
-                "填入房主「网卡」那行显示的地址，端口要和对方一致")
+                "把房主发给你的地址填进来，端口保持和房主一样就行")
 
     def _build_launch_card(self):
         card = Card("③ 启动")
@@ -808,6 +831,8 @@ class Launcher(QMainWindow):
         self.cfg["persona"] = self._current_persona_key()
         self.cfg["iso_path"] = self.iso_edit.text().strip()
         self.cfg["game_room_code"] = self.game_room_code.text().strip().upper()
+        _gip = self.game_net_adapter.currentData() or ""
+        self.cfg["game_local_ip"] = "" if _gip == "__auto__" else _gip
         self.cfg["auto_launch_assistant"] = self.with_assist.isChecked()
         self.cfg["record_progress"] = self.record_progress.isChecked()
         self.cfg["bubble_size"] = self.bubble_size_box.currentData()
@@ -816,7 +841,8 @@ class Launcher(QMainWindow):
         self.cfg["peer_enabled"] = self.peer_enabled.isChecked()
         self.cfg["peer_is_host"] = self.peer_mode.currentIndex() == 0
         self.cfg["peer_remote"] = self.peer_remote.text().strip()
-        self.cfg["peer_local_ip"] = self.peer_adapter.currentData() or ""
+        _pip = self.peer_adapter.currentData() or ""
+        self.cfg["peer_local_ip"] = "" if _pip == "__auto__" else _pip
         try:
             self.cfg["peer_port"] = int(self.peer_port.text().strip() or 7150)
         except ValueError:
