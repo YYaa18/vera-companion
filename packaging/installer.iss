@@ -49,8 +49,11 @@ Name: "launchafter"; Description: "安装完成后启动"; GroupDescription: "�
 ; 主程序（单文件 exe，含启动器与助手）
 Source: "..\dist\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 ; 游戏程序本体（MIT 开源的 recvx-enhanced-port，不含任何游戏数据）
-Source: "..\vendor\recvx.exe"; DestDir: "{app}\game"; Flags: ignoreversion
+Source: "..\vendor\game\recvx.exe"; DestDir: "{app}\game"; Flags: ignoreversion
 Source: "..\vendor\LICENSE-recvx-enhanced-port.txt"; DestDir: "{app}\game"; Flags: ignoreversion
+; mods 目录（可选扩展：HD 材质包、自制房间等）。附中英双语说明。
+Source: "..\vendor\game\mods\README_MODS_中英.txt"; DestDir: "{app}\game\mods"; Flags: ignoreversion
+Source: "..\vendor\game\mods\textures\README_HD材质包_中英.txt"; DestDir: "{app}\game\mods\textures"; Flags: ignoreversion
 ; 人设文本，用户可以自己改
 Source: "..\app\personas\*.txt"; DestDir: "{app}\personas"; Flags: ignoreversion
 ; 同步上游的工具
@@ -64,6 +67,11 @@ Source: "..\update\UPSTREAM.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 [Dirs]
 ; 用户数据目录（安装时就要存在，方便放配置）
 Name: "{app}\personas"; Permissions: users-modify
+; 游戏的可选扩展目录。游戏不会自己创建，缺失时 HD 材质包没处放。
+Name: "{app}\game\mods"; Permissions: users-modify
+Name: "{app}\game\mods\textures"; Permissions: users-modify
+; 存档目录（游戏也会自己建，这里先建好省得用户找）
+Name: "{app}\game\save"; Permissions: users-modify
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
