@@ -363,7 +363,130 @@ class Launcher(QMainWindow):
         self.iso_status.setStyleSheet(f"color:{DIM};font-size:11px;border:none;")
         self.iso_status.setFont(QFont("Microsoft YaHei", 8))
         card.lay.addWidget(self.iso_status)
+
+        # ---- 联机（UU 虚拟局域网）----
+        sep = QFrame()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet("background:#2b2f3a;border:none;")
+        card.lay.addWidget(sep)
+
+        net_head = QLabel("联机 · UU 虚拟局域网")
+        net_head.setFont(QFont("Microsoft YaHei", 9, QFont.Bold))
+        net_head.setStyleSheet(f"color:{FG};border:none;background:transparent;")
+        card.lay.addWidget(net_head)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(7)
+
+        def lab2(t):
+            w = QLabel(t)
+            w.setFont(QFont("Microsoft YaHei", 9))
+            w.setStyleSheet(f"color:{DIM};border:none;background:transparent;")
+            return w
+
+        edit_style = (f"background:{CARD2};color:{FG};border:1px solid #2f3441;"
+                      "border-radius:7px;padding:4px 8px;")
+
+        self.game_net_adapter = QComboBox()
+        try:
+            import net_adapters
+            rows = net_adapters.list_adapters()
+        except Exception:
+            rows = []
+        self._game_adapters = rows
+        for ip, alias, kind in rows:
+            tag = {"lan": "局域网", "public": "公网", "link-local": "未配置"}.get(kind, "")
+            self.game_net_adapter.addItem(f"{ip}  ({alias}, {tag})", ip)
+        if not rows:
+            self.game_net_adapter.addItem("（没检测到网卡）", "")
+        self.game_net_adapter.setMinimumHeight(30)
+        self.game_net_adapter.setStyleSheet(edit_style)
+
+        self.game_room_code = QLineEdit(self.cfg.get("game_room_code", ""))
+        self.game_room_code.setPlaceholderText("游戏里 COPY JOIN ADDRESS 得到的 8 位加入码")
+        self.game_room_code.setMinimumHeight(30)
+        self.game_room_code.setStyleSheet(edit_style)
+
+        grid.addWidget(lab2("我的地址"), 0, 0)
+        grid.addWidget(self.game_net_adapter, 0, 1, 1, 2)
+        grid.addWidget(lab2("加入码"), 1, 0)
+        grid.addWidget(self.game_room_code, 1, 1, 1, 2)
+        grid.setColumnStretch(1, 1)
+        card.lay.addLayout(grid)
+
+        # 生成好的完整地址 + 复制按钮
+        combo = QHBoxLayout()
+        self.game_addr_label = QLabel("")
+        self.game_addr_label.setWordWrap(True)
+        self.game_addr_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.game_addr_label.setFont(QFont("Consolas", 9))
+        self.game_addr_label.setStyleSheet(
+            f"color:{ACCENT};background:{CARD2};border:1px solid #2f3441;"
+            "border-radius:7px;padding:6px 9px;")
+        combo.addWidget(self.game_addr_label, 1)
+
+        copy_btn = QPushButton("复制")
+        copy_btn.setFixedWidth(56)
+        copy_btn.setMinimumHeight(30)
+        copy_btn.clicked.connect(self._copy_game_addr)
+        copy_btn.setStyleSheet(self._btn_style(secondary=True))
+        combo.addWidget(copy_btn)
+        card.lay.addLayout(combo)
+
+        self.game_net_hint = QLabel("")
+        self.game_net_hint.setWordWrap(True)
+        self.game_net_hint.setFont(QFont("Microsoft YaHei", 8))
+        self.game_net_hint.setStyleSheet(f"color:{DIM};border:none;background:transparent;")
+        card.lay.addWidget(self.game_net_hint)
+
+        self._refresh_game_addr()
+        self.game_net_adapter.currentIndexChanged.connect(self._refresh_game_addr)
+        self.game_room_code.textChanged.connect(self._refresh_game_addr)
         return card
+
+    def _game_addr(self):
+        """Build ip:7140#CODE from the chosen adapter and the join code."""
+        ip = self.game_net_adapter.currentData() or ""
+        code = self.game_room_code.text().strip().upper()
+        if not ip:
+            return ""
+        if code:
+            return f"{ip}:7140#{code}"
+        return f"{ip}:7140"
+
+    def _refresh_game_addr(self, *_):
+        addr = self._game_addr()
+        if addr:
+            self.game_addr_label.setText(addr)
+            self.game_addr_label.setStyleSheet(
+                f"color:{ACCENT};background:{CARD2};border:1px solid #2f3441;"
+                "border-radius:7px;padding:6px 9px;")
+        else:
+            self.game_addr_label.setText("（先选一块网卡）")
+            self.game_addr_label.setStyleSheet(
+                f"color:{DIM};background:{CARD2};border:1px solid #2f3441;"
+                "border-radius:7px;padding:6px 9px;")
+
+        # 有没有识别到 UU
+        uu = any("uu" in alias.lower() for _ip, alias, _k in self._game_adapters)
+        if uu:
+            self.game_net_hint.setText(
+                "把上面这行发给对方。UU 同房间内直接用，不需要开端口转发。\n"
+                "加入方：MULTIPLAYER → Direct → JOIN A GAME → 把整行粘进 ADDRESS。")
+        else:
+            self.game_net_hint.setText(
+                "没检测到 UU Lanplay 网卡。用 UU 虚拟局域网联机的话，"
+                "请先在 UU 里进入同一个房间，然后重启本启动器。\n"
+                "不用 UU 的话，需要在路由器放行 UDP 7140 并填公网 IP。")
+
+    def _copy_game_addr(self):
+        addr = self._game_addr()
+        if not addr:
+            return
+        QApplication.clipboard().setText(addr)
+        self.game_addr_label.setText(addr + "   ✓ 已复制")
+        QTimer.singleShot(1600, self._refresh_game_addr)
 
     def _build_peer_card(self):
         card = Card("③ AI 之间对话（联机时）")
@@ -392,6 +515,30 @@ class Launcher(QMainWindow):
         self.peer_mode.setMinimumHeight(30)
         self.peer_mode.setStyleSheet(edit_style)
 
+        # 网卡选择：虚拟局域网下必须走 UU 分配的那块网卡
+        self.peer_adapter = QComboBox()
+        self.peer_adapters = []
+        try:
+            import net_adapters
+            self.peer_adapters = net_adapters.list_adapters()
+            auto_ip, auto_alias = net_adapters.guess_virtual_lan()
+        except Exception:
+            self.peer_adapters, auto_ip, auto_alias = [], None, None
+
+        for ip, alias, kind in self.peer_adapters:
+            tag = {"lan": "局域网", "public": "公网", "link-local": "未配置"}.get(kind, "")
+            self.peer_adapter.addItem(f"{ip}  ({alias}, {tag})", ip)
+        if not self.peer_adapters:
+            self.peer_adapter.addItem("（没检测到网卡）", "")
+        else:
+            want = self.cfg.get("peer_local_ip") or auto_ip or ""
+            for i in range(self.peer_adapter.count()):
+                if self.peer_adapter.itemData(i) == want:
+                    self.peer_adapter.setCurrentIndex(i)
+                    break
+        self.peer_adapter.setMinimumHeight(30)
+        self.peer_adapter.setStyleSheet(edit_style)
+
         self.peer_remote = QLineEdit(self.cfg.get("peer_remote", ""))
         self.peer_remote.setPlaceholderText("对方的 IP，例如 203.0.113.5")
         self.peer_remote.setMinimumHeight(30)
@@ -404,13 +551,24 @@ class Launcher(QMainWindow):
 
         grid.addWidget(lab("角色"), 0, 0)
         grid.addWidget(self.peer_mode, 0, 1, 1, 3)
-        grid.addWidget(lab("对方地址"), 1, 0)
-        grid.addWidget(self.peer_remote, 1, 1)
-        grid.addWidget(lab("端口"), 1, 2)
-        grid.addWidget(self.peer_port, 1, 3)
+        grid.addWidget(lab("网卡"), 1, 0)
+        grid.addWidget(self.peer_adapter, 1, 1, 1, 3)
+        grid.addWidget(lab("对方地址"), 2, 0)
+        grid.addWidget(self.peer_remote, 2, 1)
+        grid.addWidget(lab("端口"), 2, 2)
+        grid.addWidget(self.peer_port, 2, 3)
         grid.setColumnStretch(1, 1)
 
         card.lay.addLayout(grid)
+
+        # 房主该告诉对方什么地址
+        self.peer_hint_dynamic = QLabel("")
+        self.peer_hint_dynamic.setWordWrap(True)
+        self.peer_hint_dynamic.setFont(QFont("Microsoft YaHei", 9))
+        self.peer_hint_dynamic.setStyleSheet(
+            f"color:{ACCENT};border:none;background:transparent;")
+        card.lay.addWidget(self.peer_hint_dynamic)
+        self._peer_mode_changed()
 
         hint = QLabel(
             "只在这些时候说话：换房间、捡到东西、血量骤降，或者你右键让它去问对面。\n"
@@ -425,15 +583,27 @@ class Launcher(QMainWindow):
 
         self._peer_mode_changed()
         self.peer_mode.currentIndexChanged.connect(self._peer_mode_changed)
+        self.peer_adapter.currentIndexChanged.connect(self._peer_mode_changed)
+        self.peer_port.textChanged.connect(self._peer_mode_changed)
         return card
 
     def _peer_mode_changed(self, _i=None):
         is_host = self.peer_mode.currentIndex() == 0
         self.peer_remote.setEnabled(not is_host)
+        ip = self.peer_adapter.currentData() or ""
+        port = self.peer_port.text().strip() or "7150"
+
         if is_host:
             self.peer_remote.setPlaceholderText("房主不需要填，等对方连你")
+            if ip:
+                self.peer_hint_dynamic.setText(
+                    f"把这句发给对方 →  {ip}:{port}")
+            else:
+                self.peer_hint_dynamic.setText("没检测到网卡，无法确定自己地址")
         else:
-            self.peer_remote.setPlaceholderText("对方的公网 IP，例如 203.0.113.5")
+            self.peer_remote.setPlaceholderText("填房主那一串，例如 10.1.2.3")
+            self.peer_hint_dynamic.setText(
+                "填入房主「网卡」那行显示的地址，端口要和对方一致")
 
     def _build_launch_card(self):
         card = Card("③ 启动")
@@ -545,12 +715,14 @@ class Launcher(QMainWindow):
         self.cfg["voice"] = "stella" if self.voice_box.currentIndex() == 0 else "tide"
         self.cfg["persona"] = self._current_persona_key()
         self.cfg["iso_path"] = self.iso_edit.text().strip()
+        self.cfg["game_room_code"] = self.game_room_code.text().strip().upper()
         self.cfg["auto_launch_assistant"] = self.with_assist.isChecked()
         self.cfg["record_progress"] = self.record_progress.isChecked()
         self.cfg["bubble_size"] = self.bubble_size_box.currentData()
         self.cfg["peer_enabled"] = self.peer_enabled.isChecked()
         self.cfg["peer_is_host"] = self.peer_mode.currentIndex() == 0
         self.cfg["peer_remote"] = self.peer_remote.text().strip()
+        self.cfg["peer_local_ip"] = self.peer_adapter.currentData() or ""
         try:
             self.cfg["peer_port"] = int(self.peer_port.text().strip() or 7150)
         except ValueError:
