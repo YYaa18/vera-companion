@@ -311,6 +311,11 @@ class Launcher(QMainWindow):
         )
         grid.addWidget(self.bubble_size_box, 5, 1, 1, 3)
 
+        self.duck_check = QCheckBox("说话时自动压低游戏音量（避免两个声音打架）")
+        self.duck_check.setChecked(bool(self.cfg.get("duck_game_audio", True)))
+        self._style_check(self.duck_check)
+        grid.addWidget(self.duck_check, 6, 0, 1, 4)
+
         grid.setColumnStretch(1, 1)
         grid.setColumnMinimumWidth(0, 70)
 
@@ -318,7 +323,7 @@ class Launcher(QMainWindow):
         self.persona_hint.setWordWrap(True)
         self.persona_hint.setFont(QFont("Microsoft YaHei", 8))
         self.persona_hint.setStyleSheet(f"color:{DIM};border:none;background:transparent;")
-        grid.addWidget(self.persona_hint, 6, 1, 1, 3)
+        grid.addWidget(self.persona_hint, 7, 1, 1, 3)
         self._persona_changed()
 
         card.lay.addLayout(grid)
@@ -765,6 +770,7 @@ class Launcher(QMainWindow):
         self.cfg["auto_launch_assistant"] = self.with_assist.isChecked()
         self.cfg["record_progress"] = self.record_progress.isChecked()
         self.cfg["bubble_size"] = self.bubble_size_box.currentData()
+        self.cfg["duck_game_audio"] = self.duck_check.isChecked()
         self.cfg["peer_enabled"] = self.peer_enabled.isChecked()
         self.cfg["peer_is_host"] = self.peer_mode.currentIndex() == 0
         self.cfg["peer_remote"] = self.peer_remote.text().strip()
