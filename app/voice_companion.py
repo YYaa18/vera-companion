@@ -351,7 +351,11 @@ class App(QObject):
         self.peer_timer.start(8000)
 
     def _on_peer_message(self, msg):
-        """A line arrived from the other AI."""
+        """A line arrived from the other AI.
+
+        这是允许主动开口的第二个时机（和启动问候一样）：
+        对面有实质消息时，本地 AI 可以主动跟玩家说一句。
+        """
         if not self.dialogue:
             return
         got = self.dialogue.on_message(msg)
@@ -359,31 +363,27 @@ class App(QObject):
             return
         kind, text, peer = got
 
-        if not self.busy:
-            def work():
-                try:
-                    if kind == "query":
-                        prompt = (f"对面那个 AI 问你：{text}\n"
-                                  "用一句话回它，说你这边玩家的真实情况"
-                                  "（血量、在哪、有什么）。短，别客套。")
-                    else:
-                        prompt = (f"对面那个 AI 说：{text}\n"
-                                  "如果这件事对你这边玩家有用（对面快死了、卡住了、"
-                                  "发现了好东西），就用一句话转告他；"
-                                  "没什么用就别说话，只回一个「嗯」也可以。")
-                    msgs = self._build_messages(prompt)
-                    ans = chat(self.key, self.base, self.model, msgs)
-                    reply = extract_ask(ans)
-                    if reply:
-                        self.dialogue.ask_peer(reply)
-                    self._speak(ans)
-                except Exception:
-                    pass
-
-            threading.Thread(target=work, daemon=True).start()
-        else:
-            # 忙的时候至少让玩家知道对面说了什么
+        if self.busy:
             self._ui(lambda: self._notify(f"{peer}：{text}"))
+            return
+
+        def work():
+            try:
+                if kind == "query":
+                    prompt = "对面那个 AI 问你：" + text + "。用一句话回它，说你这边玩家的真实情况（血量、在哪、有什么）。短，别客套。"
+                else:
+                    prompt = ("对面那个 AI 说：" + text +
+                              "。如果这件事对你这边玩家有用（对面快死了、卡住了、发现了好东西），就用一句话转告他；没什么用就只回一个嗯。")
+                msgs = self._build_messages(prompt)
+                ans = chat(self.key, self.base, self.model, msgs)
+                reply = extract_ask(ans)
+                if reply:
+                    self.dialogue.ask_peer(reply)
+                self._speak(ans)
+            except Exception as e:
+                print(f"[peer] 回应失败 {type(e).__name__}: {e}", flush=True)
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _peer_tick(self):
         if not self.dialogue:
