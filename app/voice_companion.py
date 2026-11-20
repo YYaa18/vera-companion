@@ -260,6 +260,17 @@ class App(QObject):
 
         self.recorder = voice.Recorder(device=self.in_dev)
         self.player = voice.Player(device=self.out_dev)
+
+        # 说话时压低游戏音量
+        self.ducker = None
+        _cfg = appcfg.load()
+        if _cfg.get("duck_game_audio", True):
+            try:
+                import audio_duck
+                self.ducker = audio_duck.Ducker(
+                    level=float(_cfg.get("duck_level", 0.22) or 0.22))
+            except Exception:
+                self.ducker = None
         self.game = GameState()
         self.cheats = None
         if self.power == "trickster":
@@ -542,6 +553,11 @@ class App(QObject):
         if self.busy or getattr(self, "_listening", False):
             return
         self.player.stop()          # stop talking so it can hear you
+        if self.ducker:
+            try:
+                self.ducker.unduck()
+            except Exception:
+                pass
         self._listening = True
         self._listen_started = time.time()
         self.pet.set_state("listening")
@@ -780,6 +796,11 @@ class App(QObject):
     def _start_playing_ui(self, wav, text):
         self._set_busy(False)
         self.pet.set_state("talking")
+        if self.ducker:
+            try:
+                self.ducker.duck()
+            except Exception:
+                pass
         self.player.play(wav)
         self._last_text = text
 
@@ -790,6 +811,11 @@ class App(QObject):
     def _done_ui(self, text):
         self._set_busy(False)
         self.pet.set_state("idle")
+        if self.ducker:
+            try:
+                self.ducker.unduck()
+            except Exception:
+                pass
         self._last_text = text
 
     def _run_ui_call(self, fn):
@@ -812,6 +838,11 @@ class App(QObject):
         """While audio is playing the mouth should move; when it ends, go idle."""
         if self.pet.state == "talking" and not self.player.busy:
             self.pet.set_state("idle")
+            if self.ducker:
+                try:
+                    self.ducker.unduck()
+                except Exception:
+                    pass
         if getattr(self, "_listening", False):
             lvl = self.recorder.level()
             if lvl > 0.02:
