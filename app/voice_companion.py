@@ -351,10 +351,12 @@ class App(QObject):
         self.peer_timer.start(8000)
 
     def _on_peer_message(self, msg):
-        """A line arrived from the other AI.
+        """收到对面 AI 的消息。
 
-        这是允许主动开口的第二个时机（和启动问候一样）：
-        对面有实质消息时，本地 AI 可以主动跟玩家说一句。
+        三种类型：
+          query  —— 对面在问我们这边的情况，回答它，并让自己的玩家知情
+          answer —— 对面在回答我们的提问，转告自己的玩家（这正是玩家要的）
+          event  —— 对面的状态播报，值得说才说
         """
         if not self.dialogue:
             return
@@ -370,10 +372,34 @@ class App(QObject):
         def work():
             try:
                 if kind == "query":
-                    prompt = "对面那个 AI 问你：" + text + "。用一句话回它，说你这边玩家的真实情况（血量、在哪、有什么）。短，别客套。"
-                else:
-                    prompt = ("对面那个 AI 说：" + text +
-                              "。如果这件事对你这边玩家有用（对面快死了、卡住了、发现了好东西），就用一句话转告他；没什么用就只回一个嗯。")
+                    # 对面问我们：用真实状态回答，并且告诉自己的玩家一声
+                    prompt = ("对面那个 AI 问你：" + text +
+                              "。请用一句话回答它，说你这边玩家的真实情况"
+                              "（血量、位置、背包里有用的东西）。短，直接，别客套。")
+                    msgs = self._build_messages(prompt)
+                    ans = chat(self.key, self.base, self.model, msgs)
+                    clean = clean_for_speech(ans)
+                    if clean:
+                        self.dialogue.answer_peer(clean)
+                        self.dialogue.note_own(clean, "answer")
+                    # 同时让自己的玩家知道"对面来问了，我答了什么"
+                    self._speak("对面问我情况，我告诉他们了：" + clean)
+                    return
+
+                if kind == "answer":
+                    # 对面回答了我们的提问 —— 这就是玩家要的信息，必须转告
+                    prompt = ("对面那个 AI 回答说：" + text +
+                              "。这是你刚才帮玩家问到的信息，请用一句话转告他。"
+                              "直接说结果，别绕弯。")
+                    msgs = self._build_messages(prompt)
+                    ans = chat(self.key, self.base, self.model, msgs)
+                    self._speak(ans)
+                    return
+
+                # event：对面播报状态
+                prompt = ("对面那个 AI 说：" + text +
+                          "。如果这件事对你这边玩家有用（对面快死了、卡住了、"
+                          "发现了好东西），就用一句话转告他；没什么用就只回一个嗯。")
                 msgs = self._build_messages(prompt)
                 ans = chat(self.key, self.base, self.model, msgs)
                 reply = extract_ask(ans)
@@ -777,6 +803,14 @@ class App(QObject):
                 print(f'[ask] 收到 {len(ans)} 字', flush=True)
                 self.history.append({"role": "user", "content": "(玩家说话)" if silent else text})
                 self.history.append({"role": "assistant", "content": ans})
+
+                # AI 可能被要求去问对面 —— 它用 [[ASK]] 标记表达
+                asked = extract_ask(ans)
+                if asked and self.dialogue and self.dialogue.enabled:
+                    self.dialogue.ask_peer(asked)
+                    self.dialogue.note_own(asked, "query")
+                    print(f"[ask] 已向对面提问: {asked[:40]}", flush=True)
+
                 self._handle_action(ans)
                 self._speak(ans)
             except Exception as e:
