@@ -1061,8 +1061,9 @@ UU 同一个房间里直接就能连，不用动路由器。""")
             f"color:{OK if ok else WARN};font-size:11px;border:none;")
 
     def _exe(self):
-        """The game executable."""
-        return os.path.join(config.GAME_ROOT, "recvx.exe")
+        """The game executable, wherever the user installed it."""
+        d = config.resolve_game_dir()
+        return os.path.join(d, "recvx.exe") if d else ""
 
     def _assist_cmd(self):
         """Command that starts the assistant, whether frozen or from source."""
